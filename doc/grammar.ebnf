@@ -44,14 +44,15 @@ primaryExpr   = "nil"
               | NUMBER
               | CHAR
               | STRING
-              | "fn" IDENTIFIER? fnBody
+              | "fn" fnBody
               | parenExpr
               | IDENTIFIER "{" fieldList? "}"
               | IDENTIFIER
 parenExpr     = "(" expression ")"
 fnBody        = "(" paramList? ")" block
 paramList     = param ("," param)* ","?
-param         = IDENTIFIER (IDENTIFIER | "...")
+param         = (IDENTIFIER | "...") ":" typeExpr
 block         = "{" statement* ("return" (exprList ","?)?)? "}"
 fieldList     = field ("," field)* ","?
 field         = ((IDENTIFIER | "[" expression "]") "=")? expression
+typeExpr      = "any"

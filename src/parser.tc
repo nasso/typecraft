@@ -177,6 +177,10 @@ M.statement = fn(any st) {
     stmt.expr = M.parenExpr(st)
     stmt.block = M.block(st)
     return stmt
+  } elseif(next(st, "break")) {
+    let stmt = any {}
+    stmt.ty = "break_stmt"
+    return stmt
   } elseif(peek(st, "for")) {
     return todo(st, "for loop")
   } elseif(peek(st, "break")) {
@@ -274,6 +278,7 @@ M.unaryExpr = fn(any st) {
 
 M.postfixExpr = fn(any st) {
   let expr = M.primaryExpr(st)
+  if (!expr) { return }
 
   while (peek(st, ".", "[", "(")) {
     if (next(st, ".")) {
@@ -498,12 +503,22 @@ M.fnBody = fn(any st) {
   let params = any {}
   while (!next(st, ")")) {
     let param = any {}
-    param.typeIdent = next(st, "identifier")
+
     if (next(st, "...")) {
       isVariadic = true
     } else {
       param.ident = expect(st, "identifier")
-      params[#params + 1] = param
+
+      if (next(st, ":")) {
+        param.type = M.typeExpr(st)
+        params[#params + 1] = param
+      } elseif (next(st, "...")) {
+        isVariadic = true
+      } else {
+        param.type = param.ident
+        param.ident = expect(st, "identifier")
+        params[#params + 1] = param
+      }
     }
     if (!peek(st, ")")) {
       expect(st, ",")
@@ -556,6 +571,17 @@ M.returnStmt = fn(any st) {
   stmt.ty = "return_stmt"
   stmt.exprs = exprs
   return stmt
+}
+
+M.typeExpr = fn(any st) {
+  let ident = expect(st, "identifier")
+
+  if (ident.text != "any") {
+    addError(st, "invalid type '" .. ident.text .. "' (expected 'any')")
+    return
+  }
+
+  return ident
 }
 
 return M

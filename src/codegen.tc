@@ -10,6 +10,7 @@ M.lower = fn(any module) {
   let lastStmt = module.stmts[#module.stmts]
   if (lastStmt && lastStmt.ty != "return_stmt") {
     modTbl = ir.var(modBlock)
+    ir.storeOne(modBlock, modTbl, ir.tableConstructor(any {}))
   }
 
   let st = any {}
@@ -107,6 +108,8 @@ M.genStatement = fn(any st, any stmt, any modTbl) {
     st.b = st.b.parent
 
     ir.loopWhile(st.b, cond, block)
+  } elseif (stmt.ty == "break_stmt") {
+    ir.brk(st.b)
   } else {
     error("[codegen] unsupported statement: " .. stmt.ty, 0)
   }

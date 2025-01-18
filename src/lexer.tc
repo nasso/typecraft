@@ -139,6 +139,7 @@ fn scanToken(any st) {
   if (c == '[') { return mkToken(st, "[") }
   if (c == ']') { return mkToken(st, "]") }
   if (c == ',') { return mkToken(st, ",") }
+  if (c == ':') { return mkToken(st, ":") }
   if (c == '+') { return mkToken(st, "+") }
   if (c == '-') { return mkToken(st, "-") }
   if (c == '*') { return mkToken(st, "*") }

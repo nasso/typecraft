@@ -156,6 +156,8 @@ M.emitStatement = fn(any st, any stmt) {
     M.emitBlock(st, stmt.block)
     st.endBlock()
     st.w("end")
+  } elseif (stmt.ty == "break") {
+    st.w("break")
   } else {
     error("[emit] unsupported statement: '" .. stmt.ty .. "'", 0)
   }
@@ -239,12 +241,16 @@ M.emitExpr = fn(any st, any expr) {
     }
     st.w("}")
   } elseif (expr.ty == "unop") {
+    st.w("(")
     st.w(LUAOPS[expr.op])
     M.emitExpr(st, expr.expr)
+    st.w(")")
   } elseif (expr.ty == "binop") {
+    st.w("(")
     M.emitExpr(st, expr.lhs)
     st.w(LUAOPS[expr.op])
     M.emitExpr(st, expr.rhs)
+    st.w(")")
   } else {
     error("[emit] unsupported expression: '" .. expr.ty .. "'", 0)
   }

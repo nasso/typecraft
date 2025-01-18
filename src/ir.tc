@@ -24,6 +24,12 @@ M.ret = fn(any b, any exprs) {
   b.stmts[#b.stmts + 1] = stmt
 }
 
+M.brk = fn(any b) {
+  let stmt = any {}
+  stmt.ty = "break"
+  b.stmts[#b.stmts + 1] = stmt
+}
+
 M.branch = fn(any cond, any block) {
   let b = any {}
   b.cond = cond
@@ -54,8 +60,8 @@ M.storeAll = fn(any b, any lvals, any rvals) {
   b.stmts[#b.stmts + 1] = stmt
 }
 
-M.storeOne = fn(any b, any lvals, any rvals) {
-  return M.storeAll(b, any { lvals }, any { rvals })
+M.storeOne = fn(any b, any lval, any rval) {
+  return M.storeAll(b, any { lval }, any { rval })
 }
 
 M.callStmt = fn(any b, any expr) {
