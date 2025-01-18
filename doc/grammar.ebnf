@@ -1,0 +1,57 @@
+module        = moduleStmt* ("return" expression)? EOF
+moduleStmt    = "pub"? "mod" IDENTIFIER
+              | "pub" letStmt
+              | "pub" fnStmt
+              | statement
+statement     = letStmt
+              | fnStmt
+              | "if" parenExpr block
+                ("elseif" parenExpr block)*
+                ("else" block)?
+              | "while" parenExpr block
+              | "for" "(" IDENTIFIER  "=" expression   ","
+                          expression ("," expression)? ")" block
+              | "for" "(" identList "in" exprList ")" block
+              | "break"
+              | "continue"
+              | assignStmt
+              | postfixExpr "(" (exprList ","?)? ")"
+letStmt       = "let" identList ("=" exprList)?
+fnStmt        = "fn" IDENTIFIER fnBody
+assignStmt    = lvalueList "=" exprList
+identList     = IDENTIFIER ("," IDENTIFIER)*
+exprList      = expression ("," expression)*
+lvalueList    = lvalue     ("," lvalue    )*
+lvalue        = "_" | postfixExpr
+expression    = concatExpr
+concatExpr    = andExpr (".." andExpr)*
+andExpr       = orExpr ("&&" orExpr)*
+orExpr        = compExpr ("||" compExpr)*
+compExpr      = sumExpr (("==" | "!=" | "<=" | ">=" | "<" | ">") sumExpr)*
+sumExpr       = productExpr (("+" | "-") productExpr)*
+productExpr   = unaryExpr (("*" | "/" | "//" | "%") unaryExpr)*
+unaryExpr     = ("!" | "#" | "-" | "+")* powerExpr
+powerExpr     = postfixExpr ("^" callExpr)*
+postfixExpr   = primaryExpr
+                  ( "." IDENTIFIER
+                  | "[" expression "]"
+                  | "(" (exprList ","?)? ")"
+                  )*
+primaryExpr   = "nil"
+              | "true"
+              | "false"
+              | "..."
+              | NUMBER
+              | CHAR
+              | STRING
+              | "fn" IDENTIFIER? fnBody
+              | parenExpr
+              | IDENTIFIER "{" fieldList? "}"
+              | IDENTIFIER
+parenExpr     = "(" expression ")"
+fnBody        = "(" paramList? ")" block
+paramList     = param ("," param)* ","?
+param         = IDENTIFIER (IDENTIFIER | "...")
+block         = "{" statement* ("return" (exprList ","?)?)? "}"
+fieldList     = field ("," field)* ","?
+field         = ((IDENTIFIER | "[" expression "]") "=")? expression

@@ -1,0 +1,200 @@
+let M = any {}
+
+M.block = fn(any parent) {
+  let b = any {}
+  b.stmts = any {}
+  b.bc = 0
+  b.vc = 0
+  b.vs = 1
+  b.i = 0
+
+  if (parent) {
+    parent.bc = parent.bc + 1
+    b.i = parent.bc
+    b.parent = parent
+  }
+
+  return b
+}
+
+M.ret = fn(any b, any exprs) {
+  let stmt = any {}
+  stmt.ty = "return"
+  stmt.exprs = exprs
+  b.stmts[#b.stmts + 1] = stmt
+}
+
+M.branch = fn(any cond, any block) {
+  let b = any {}
+  b.cond = cond
+  b.block = block
+  return b
+}
+
+M.conditional = fn(any b, any branches) {
+  let stmt = any {}
+  stmt.ty = "conditional"
+  stmt.branches = branches
+  b.stmts[#b.stmts + 1] = stmt
+}
+
+M.loopWhile = fn(any b, any cond, any block) {
+  let stmt = any {}
+  stmt.ty = "while"
+  stmt.cond = cond
+  stmt.block = block
+  b.stmts[#b.stmts + 1] = stmt
+}
+
+M.storeAll = fn(any b, any lvals, any rvals) {
+  let stmt = any {}
+  stmt.ty = "store"
+  stmt.lvals = lvals
+  stmt.rvals = rvals
+  b.stmts[#b.stmts + 1] = stmt
+}
+
+M.storeOne = fn(any b, any lvals, any rvals) {
+  return M.storeAll(b, any { lvals }, any { rvals })
+}
+
+M.callStmt = fn(any b, any expr) {
+  assert(expr.ty == "call", "expected call expression")
+
+  let stmt = any {}
+  stmt.ty = "call"
+  stmt.expr = expr
+  b.stmts[#b.stmts + 1] = stmt
+}
+
+M.lit = fn(any value) {
+  let lit = any {}
+  lit.ty = "literal"
+  lit.value = value
+  return lit
+}
+
+M.vararg = fn() {
+  let lit = any {}
+  lit.ty = "vararg"
+  return lit
+}
+
+M.var = fn(any b, any opts) {
+  let globalIdent = opts && opts.globalIdent
+
+  if (globalIdent) {
+    let var = any {}
+    var.ty = "var"
+    var.ident = globalIdent
+    return var
+  }
+
+  b.vc = b.vc + 1
+
+  let var = any {}
+  var.ty = "var"
+  var.b = b
+  var.i = b.vc
+  return var
+}
+
+M.vars = fn(any b, any count, any opts) {
+  let vars = any {}
+
+  while (count > 0) {
+    vars[#vars + 1] = M.var(b, opts)
+    count = count - 1
+  }
+
+  return vars
+}
+
+M.function = fn(any b, any paramCount) {
+  let bodyBlock = M.block(b)
+  let params = M.vars(bodyBlock, paramCount)
+
+  bodyBlock.vs = bodyBlock.vc + 1
+
+  let func = any {}
+  func.ty = "function"
+  func.params = params
+  func.variadic = false
+  func.body = bodyBlock
+  return func 
+}
+
+M.call = fn(any callee, any args) {
+  let expr = any {}
+  expr.ty = "call"
+  expr.callee = callee
+  expr.args = args
+  return expr
+}
+
+M.index = fn(any tbl, any idx) {
+  let expr = any {}
+  expr.ty = "index"
+  expr.tbl = tbl
+  expr.idx = idx
+  return expr
+}
+
+M.tableEntry = fn(any key, any value) {
+  let entry = any {}
+  entry.key = key
+  entry.value = value
+  return entry
+}
+
+M.tableConstructor = fn(any entries) {
+  let expr = any {}
+  expr.ty = "table"
+  expr.entries = entries
+  return expr
+}
+
+fn regUnop(any name) {
+  M[name] = fn(any expr) {
+    let op = any {}
+    op.ty = "unop"
+    op.op = name
+    op.expr = expr
+    return op
+  }
+}
+
+regUnop("pos")
+regUnop("neg")
+regUnop("not")
+regUnop("len")
+
+fn regBinop(any name, any funcName) {
+  M[funcName || name] = fn(any lhs, any rhs) {
+    let op = any {}
+    op.ty = "binop"
+    op.op = name
+    op.lhs = lhs
+    op.rhs = rhs
+    return op
+  }
+}
+
+regBinop("add")
+regBinop("sub")
+regBinop("mul")
+regBinop("div")
+regBinop("idiv")
+regBinop("mod", "mod1")
+regBinop("pow")
+regBinop("concat")
+regBinop("or")
+regBinop("and")
+regBinop("eq")
+regBinop("neq")
+regBinop("lte")
+regBinop("gte")
+regBinop("lt")
+regBinop("gt")
+
+return M

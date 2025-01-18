@@ -1,0 +1,561 @@
+let M = any {}
+
+fn eof(any st) {
+  return st.cur > #st.tks
+}
+
+fn peek(any st, any ...) {
+  let t = st.tks[st.cur]
+
+  if (!t) { return }
+
+  if (...) {
+    let tys = table.pack(...)
+    let ty = t.ty
+    let i = 1
+    let n = #tys
+
+    while (i <= n) {
+      if (ty == tys[i]) {
+        return t
+      }
+      i = i + 1
+    }
+
+    return nil
+  }
+
+  return t
+}
+
+fn next(any st, any ...) {
+  let t = peek(st, ...)
+
+  if (t) { st.cur = st.cur + 1 }
+
+  return t
+}
+
+fn addError(any st, any msg, any token) {
+  if (st.panic) { return }
+
+  st.panic = true
+  st.errors[#st.errors + 1] = any {
+    msg = msg,
+    token = token || next(st),
+  }
+}
+
+fn todo(any st, any msg) {
+  if (msg) {
+    msg = "todo: " .. msg
+  } else {
+    msg = "todo"
+  }
+
+  addError(st, msg, next(st))
+}
+
+fn expect(any st, any ...) {
+  let t = next(st, ...)
+
+  if (t) { return t }
+
+  let tys = table.pack(...)
+
+  if (#tys == 0) {
+    addError(st, "unexpected eof")
+  } elseif (#tys == 1) {
+    addError(st, "expected " .. tys[1])
+  } else {
+    addError(st, "expected one of: " .. table.concat(tys, ", "))
+  }
+}
+
+fn sync(any st, any ...) {
+  if (!st.panic) { return }
+  st.panic = false
+
+  while (!peek(st, ...)) {
+    if (!next(st)) { return }
+  }
+}
+
+M.parse = fn(any tokens) {
+  let st = any {
+    tks = tokens,
+    cur = 1,
+    errors = any {},
+    panic = false,
+  }
+
+  let node = M.module(st)
+
+  return node, st.errors
+}
+
+M.module = fn(any st) {
+  let node = any {}
+  node.ty = "module"
+
+  node.stmts = any {}
+  while (!eof(st) && !peek(st, "return")) {
+    node.stmts[#node.stmts + 1] = M.moduleStmt(st)
+
+    sync(st, "pub", "mod", "let", "fn", "if", "while", "for", "return")
+  }
+
+  if (peek(st, "return")) {
+    node.stmts[#node.stmts + 1] = M.returnStmt(st)
+  }
+
+  if (!eof(st)) {
+    addError(st, "unexpected token")
+  }
+
+  return node
+}
+
+M.moduleStmt = fn(any st) {
+  let pubToken = next(st, "pub")
+
+  if (peek(st, "mod")) {
+    let modToken = expect(st, "mod")
+    let ident = expect(st, "identifier")
+
+    let decl = any {}
+    decl.ty = "mod_decl"
+    decl.public = pubToken != nil
+    decl.ident = ident
+    return decl
+  } elseif (peek(st, "let")) {
+    let decl = M.letStmt(st)
+    if (!decl) { return }
+    decl.public = pubToken != nil
+    return decl
+  } elseif (peek(st, "fn")) {
+    let decl = M.fnStmt(st)
+    if (!decl) { return }
+    decl.public = pubToken != nil
+    return decl
+  }
+
+  return M.statement(st)
+}
+
+M.statement = fn(any st) {
+  if (peek(st, "let")) {
+    return M.letStmt(st)
+  } elseif (peek(st, "fn")) {
+    return M.fnStmt(st)
+  } elseif (next(st, "if")) {
+    let clauses = any {}
+    clauses[1] = any {}
+    clauses[1].cond = M.parenExpr(st)
+    clauses[1].then = M.block(st)
+
+    while (next(st, "elseif")) {
+      let clause = any {}
+      clause.cond = M.parenExpr(st)
+      clause.then = M.block(st)
+      clauses[#clauses + 1] = clause
+    }
+
+    if (next(st, "else")) {
+      let clause = any {}
+      clause.then = M.block(st)
+      clauses[#clauses + 1] = clause
+    }
+
+    let stmt = any {}
+    stmt.ty = "if_stmt"
+    stmt.clauses = clauses
+    return stmt
+  } elseif(next(st, "while")) {
+    let stmt = any {}
+    stmt.ty = "while_stmt"
+    stmt.expr = M.parenExpr(st)
+    stmt.block = M.block(st)
+    return stmt
+  } elseif(peek(st, "for")) {
+    return todo(st, "for loop")
+  } elseif(peek(st, "break")) {
+    return todo(st, "break statement")
+  } elseif(peek(st, "continue")) {
+    return todo(st, "continue statement")
+  }
+
+  let expr = M.postfixExpr(st)
+  if (!expr) { return }
+
+  if (expr.ty == "call_expr") {
+    let stmt = any {}
+    stmt.ty = "call_stmt"
+    stmt.expr = expr
+    return stmt
+  }
+
+  let lvalues = any { expr }
+
+  while (next(st, ",")) {
+    if (peek(st, "_")) {
+      return todo(st, "wildcard lvalue")
+    }
+    lvalues[#lvalues + 1] = M.postfixExpr(st)
+  }
+
+  expect(st, "=")
+
+  let rvalues = any {}
+  rvalues[1] = M.expression(st)
+
+  while (next(st, ",")) {
+    rvalues[#rvalues + 1] = M.expression(st)
+  }
+
+  let stmt = any {}
+  stmt.ty = "assign_stmt"
+  stmt.lvalues = lvalues
+  stmt.rvalues = rvalues
+  return stmt
+}
+
+M.letStmt = fn(any st) {
+  expect(st, "let")
+
+  let idents = any {}
+  idents[1] = next(st, "identifier")
+  while (next(st, ",")) {
+    idents[#idents + 1] = next(st, "identifier")
+  }
+
+  let exprs = any {}
+  if (next(st, "=")) {
+    exprs[1] = M.expression(st)
+    while (next(st, ",")) {
+      exprs[#exprs + 1] = M.expression(st)
+    }
+  }
+
+  let stmt = any {}
+  stmt.ty = "let_stmt"
+  stmt.idents = idents
+  stmt.exprs = exprs
+  return stmt
+}
+
+M.fnStmt = fn(any st) {
+  expect(st, "fn")
+  let ident = expect(st, "identifier")
+  if (!ident) { return }
+  let params, variadic, block = M.fnBody(st)
+  if (!params) { return }
+
+  let stmt = any {}
+  stmt.ty = "fn_stmt"
+  stmt.ident = ident
+  stmt.params = params
+  stmt.variadic = variadic
+  stmt.body = block
+  return stmt
+}
+
+M.unaryExpr = fn(any st) {
+  if (peek(st, "!", "#", "-", "+")) {
+    let expr = any {}
+    expr.ty = "unop_expr"
+    expr.op = next(st)
+    expr.expr = M.unaryExpr(st)
+    return expr
+  }
+
+  return M.powerExpr(st)
+}
+
+M.postfixExpr = fn(any st) {
+  let expr = M.primaryExpr(st)
+
+  while (peek(st, ".", "[", "(")) {
+    if (next(st, ".")) {
+      let idxExpr = any {}
+      idxExpr.ty = "member_expr"
+      idxExpr.expr = expr
+      idxExpr.ident = expect(st, "identifier")
+      expr = idxExpr
+    } elseif (next(st, "[")) {
+      let idxExpr = any {}
+      idxExpr.ty = "index_expr"
+      idxExpr.expr = expr
+      idxExpr.index = M.expression(st)
+      expect(st, "]")
+      expr = idxExpr
+    } elseif (next(st, "(")) {
+      let args = any {}
+
+      while (!next(st, ")")) {
+        args[#args + 1] = M.expression(st)
+
+        if (!peek(st, ")")) {
+          expect(st, ",")
+        }
+      }
+
+      let call = any {}
+      call.ty = "call_expr"
+      call.callee = expr
+      call.args = args
+      expr = call
+    }
+  }
+
+  return expr
+}
+
+fn binopTemplate(any p, any associativity, any ...) {
+  let argOps = table.pack(...)
+
+  assert(type(p) == "function", "p must be a function (for '"
+    .. table.concat(argOps, "', '") .. "')")
+
+  if (associativity == "left") {
+    return fn(any st) {
+      let expr = p(st)
+      if (!expr) { return }
+
+      while (peek(st, table.unpack(argOps))) {
+        let lhs = expr
+        let op = next(st)
+        let rhs = p(st)
+
+        if (!rhs) { return }
+
+        expr = any {}
+        expr.ty = "binop_expr"
+        expr.lhs = lhs
+        expr.op = op
+        expr.rhs = rhs
+      }
+
+      return expr
+    }
+  } elseif (associativity == "right") {
+    return fn(any st) {
+      let exprs = any { p(st) }
+      if (!exprs[1]) { return }
+      let ops = any {}
+
+      while (peek(st, table.unpack(argOps))) {
+        ops[#ops + 1] = next(st)
+
+        let expr = p(st)
+        if (!expr) { return }
+
+        exprs[#exprs + 1] = expr
+      }
+
+      while (#ops > 0) {
+        let op = ops[#ops]
+        ops[#ops] = nil
+
+        let rhs = exprs[#exprs]
+        let lhs = exprs[#exprs - 1]
+        exprs[#exprs] = nil
+
+        assert(!lhs || !rhs, "no expression left in stack")
+
+        let expr = any {}
+        expr.ty = "binop_expr"
+        expr.lhs = lhs
+        expr.op = op
+        expr.rhs = rhs
+        exprs[#exprs] = expr
+      }
+
+      assert(#exprs == 1, "more than 1 expression left in stack")
+      return exprs[#exprs]
+    }
+  } else {
+    error("invalid associativity: " .. associativity)
+  }
+}
+
+M.powerExpr = binopTemplate(M.postfixExpr, "right", "^")
+M.productExpr = binopTemplate(M.unaryExpr, "left", "*", "/", "//", "%")
+M.sumExpr = binopTemplate(M.productExpr, "left", "+", "-")
+M.compExpr = binopTemplate(M.sumExpr, "left", "==", "!=", "<=", ">=", "<",
+  ">")
+M.andExpr = binopTemplate(M.compExpr, "left", "&&")
+M.orExpr = binopTemplate(M.andExpr, "left", "||")
+M.concatExpr = binopTemplate(M.orExpr, "left", "..")
+M.expression = M.concatExpr
+
+M.primaryExpr = fn(any st) {
+  if (next(st, "nil")) {
+    return any { ty = "nil_lit" }
+  } elseif (next(st, "true")) {
+    return any { ty = "bool_lit", value = true }
+  } elseif (next(st, "false")) {
+    return any { ty = "bool_lit", value = false }
+  } elseif (next(st, "...")) {
+    return any { ty = "spread_lit" }
+  } elseif (peek(st, "number")) {
+    let tk = next(st)
+
+    let lit = any {}
+    lit.ty = "number_lit"
+    lit.value = tk.value
+    return lit
+  } elseif (peek(st, "char")) {
+    let tk = next(st)
+
+    let lit = any {}
+    lit.ty = "char_lit"
+    lit.value = tk.value
+    return lit
+  } elseif (peek(st, "string")) {
+    let tk = next(st)
+
+    let lit = any {}
+    lit.ty = "string_lit"
+    lit.value = tk.value
+    return lit
+  } elseif (next(st, "fn")) {
+    let expr = any {}
+    expr.ty = "fn_expr"
+    expr.params, expr.variadic, expr.body = M.fnBody(st)
+    return expr
+  } elseif (peek(st, "identifier")) {
+    let ident = next(st)
+
+    if (!next(st, "{")) { return ident }
+
+    let pairs = any {}
+
+    while (!next(st, "}")) {
+      let key = nil
+      let keyExpr = nil
+      let val = nil
+
+      if (next(st, "[")) {
+        keyExpr = M.expression(st)
+        if (!keyExpr) { return }
+        expect(st, "]")
+        expect(st, "=")
+
+        val = M.expression(st)
+        if (!val) { return }
+      } else {
+        val = M.expression(st)
+        if (!val) { return }
+
+        if (peek(st, "=")) {
+          if (val.ty != "identifier") {
+            addError(
+              st,
+              "unexpected '=' (did you forget to wrap the key in '[]'s?)",
+            )
+            return
+          }
+          next(st)
+          key = val.text
+
+          val = M.expression(st)
+          if (!val) { return }
+        }
+      }
+      pairs[#pairs + 1] = any {
+        key = key,
+        keyExpr = keyExpr,
+        value = val,
+      }
+
+      if (!peek(st, "}")) {
+        expect(st, ",")
+      }
+    }
+
+    let expr = any {}
+    expr.ty = "table_expr"
+    expr.typeIdent = ident
+    expr.pairs = pairs
+    return expr
+  } elseif (peek(st, "(")) {
+    return M.parenExpr(st)
+  }
+}
+
+M.parenExpr = fn(any st) {
+  expect(st, "(")
+  let expr = M.expression(st)
+  expect(st, ")")
+  return expr
+}
+
+M.fnBody = fn(any st) {
+  expect(st, "(")
+
+  let isVariadic = false
+  let params = any {}
+  while (!next(st, ")")) {
+    let param = any {}
+    param.typeIdent = next(st, "identifier")
+    if (next(st, "...")) {
+      isVariadic = true
+    } else {
+      param.ident = expect(st, "identifier")
+      params[#params + 1] = param
+    }
+    if (!peek(st, ")")) {
+      expect(st, ",")
+    }
+  }
+
+  let block = M.block(st)
+
+  return params, isVariadic, block
+}
+
+M.block = fn(any st) {
+  expect(st, "{")
+
+  let stmts = any {}
+
+  while (!peek(st, "}", "return")) {
+    stmts[#stmts + 1] = M.statement(st)
+
+    sync(st, "let", "fn", "if", "while", "for", "break", "continue",
+      "return")
+  }
+
+  if (peek(st, "return")) {
+    stmts[#stmts + 1] = M.returnStmt(st)
+  }
+
+  expect(st, "}")
+
+  return stmts
+}
+
+M.returnStmt = fn(any st) {
+  expect(st, "return")
+
+  let exprs = any {}
+
+  while (!eof(st) && !peek(st, "}")) {
+    let expr = M.expression(st)
+    if (!expr) { return }
+
+    exprs[#exprs + 1] = expr
+
+    if (!eof(st) && !peek(st, "}")) {
+      expect(st, ",")
+    }
+  }
+
+  let stmt = any {}
+  stmt.ty = "return_stmt"
+  stmt.exprs = exprs
+  return stmt
+}
+
+return M

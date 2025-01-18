@@ -1,0 +1,239 @@
+let utils = require("utils")
+let lexer = require("lexer")
+let parser = require("parser")
+let codegen = require("codegen")
+let emitter = require("emitter")
+
+let VERSION = "0.1.0"
+
+fn printUsage(any arg0, any h) {
+  h.write(h, "Usage: " .. arg0 .. " [input] [-o output]\n")
+}
+
+fn parseArgs(any args) {
+  let opts = any {
+    help = false,
+    inputPath = nil,
+    outputPath = nil,
+    emit = "lua",
+  }
+
+  let i = 1
+  while (i <= #args) {
+    let arg = args[i]
+
+    if (arg == "-h") {
+      opts.help = true
+      return opts
+    } elseif (arg == "--emit") {
+      i = i + 1
+      let v = args[i]
+      if (v != "tokens" && v != "ast" && v != "ir" && v != "lua") {
+        error("--emit must be one of: 'tokens', 'ast', 'ir', 'lua'", 0)
+      }
+      opts.emit = args[i]
+    } elseif (arg == "-o") {
+      i = i + 1
+      opts.outputPath = args[i]
+    } elseif (!opts.inputPath) {
+      opts.inputPath = arg
+    } else {
+      return nil
+    }
+    i = i + 1
+  }
+
+  opts.inputPath = opts.inputPath || "-"
+  opts.outputPath = opts.outputPath || "-"
+
+  return opts
+}
+
+fn readSource(any relPath) {
+  if (relPath == "-") {
+    return utils.ttyRead()
+  }
+
+  let path = shell.resolve(relPath)
+  let h = io.open(path, "r")
+
+  if (!h) {
+    error("No such file: " .. relPath, 0)
+  }
+
+  let source = h.read(h, "a")
+  h.close(h)
+
+  return source
+}
+
+fn writeOutput(any relPath, any txt) {
+  if (relPath == "-") {
+    return utils.ttyDisplay(txt)
+  }
+
+  let path = shell.resolve(relPath)
+  let h = io.open(path, "w")
+
+  if (!h) {
+    error("No such file: " .. relPath, 0)
+  }
+
+  h.write(h, txt)
+  h.flush(h)
+  h.close(h)
+}
+
+let opts = parseArgs(arg)
+
+if (!opts) {
+  printUsage(arg[0], io.stderr)
+  return
+} elseif (opts.help) {
+  printUsage(arg[0], io.stdout)
+  return
+}
+
+fn displayErrors(any source, any errors) {
+  let srcLines = utils.split(source, "\n")
+  let out = any {}
+
+  let ei = 1
+  while (ei <= #errors) {
+    let err = errors[ei]
+    let tk = err.token || any {
+      line = #srcLines,
+      col = #srcLines[#srcLines] + 1,
+      text = " ",
+    }
+    let li = math.max(1, tk.line - 3)
+    let nuw = math.floor(math.log(tk.line + 3, 10)) + 2
+
+    if (ei > 1) {
+      out[#out + 1] = ""
+    }
+
+    out[#out + 1] = string.format("error: %s", err.msg)
+    out[#out + 1] = string.format(
+      " -> %s:%d:%d",
+      opts.inputPath,
+      tk.line,
+      tk.col,
+    )
+
+    while (li <= tk.line + 3 && li <= #srcLines) {
+      let srcLine = srcLines[li]
+
+      out[#out + 1] = string.format(
+        "% " .. nuw .. "d | %s",
+        li,
+        srcLine,
+      )
+      if (li == tk.line) {
+        out[#out + 1] =
+          string.rep(" ", nuw) ..
+          " | " ..
+          string.rep(" ", tk.col - 1) ..
+          string.rep("-", #tk.text)
+      }
+      li = li + 1
+    }
+
+    ei = ei + 1
+  }
+
+  writeOutput("-", table.concat(out, "\n"))
+}
+
+fn ser(any t, any lvl, any outLines, any seen) {
+  if (type(t) == "nil") { return tostring(t) }
+  if (type(t) == "boolean") { return tostring(t) }
+  if (type(t) == "number") { return tostring(t) }
+  if (type(t) == "string") { return t }
+  if (type(t) != "table") { return "<" .. type(t) .. ">" }
+
+  let indent = string.rep("  ", lvl || 0)
+  let lines = outLines || any {}
+
+  seen = seen || any { t }
+
+  let k, v = next(t)
+  while (k) {
+    if (type(v) == "table") {   
+      let i = 1
+      while (i <= #seen && seen[i] != v) {
+        i = i + 1
+      }
+
+      if (seen[i] == v) {
+        lines[#lines + 1] = string.format("%s%s: <rec $%d>", indent, k, i)
+      } else {
+        seen[#seen + 1] = v
+        lines[#lines + 1] = string.format("%s%s: $%d", indent, k, #seen)
+        ser(v, (lvl || 0) + 1, lines, seen)
+      }
+    } else {
+      lines[#lines + 1] = string.format("%s%s: %s", indent, k, ser(v))
+    }
+    k, v = next(t, k)
+  }
+
+  if (!outLines) {
+    return table.concat(lines, "\n")
+  }
+}
+
+let source = readSource(opts.inputPath)
+let tokens, errors = lexer.scan(source)
+
+if (errors && #errors > 0) {
+  displayErrors(source, errors)
+  error("Compilation failed.", 0)
+}
+
+if (opts.emit == "tokens") {
+  writeOutput(
+    opts.outputPath,
+    ser(tokens),
+  )
+  return
+}
+
+let ast, errors = parser.parse(tokens)
+
+if (errors && #errors > 0) {
+  displayErrors(source, errors)
+  error("Compilation failed.", 0)
+}
+
+if (opts.emit == "ast") {
+  writeOutput(
+    opts.outputPath,
+    ser(ast),
+  )
+  return
+}
+
+let ir, errors = codegen.lower(ast)
+
+if (errors && #errors > 0) {
+  displayErrors(source, errors)
+  error("Compilation failed.", 0)
+}
+
+if (opts.emit == "ir") {
+  writeOutput(
+    opts.outputPath,
+    ser(ir),
+  )
+  return
+}
+
+let handle = utils.openHandle(opts.outputPath)
+let errors = emitter.emit(handle, ir, true)
+handle.close(handle)
+
+if (errors && #errors > 0) {
+  displayErrors(source, errors)
+  error("Compilation failed.", 0)
+}

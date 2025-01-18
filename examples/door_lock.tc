@@ -1,0 +1,49 @@
+mod term
+mod rs
+mod fs
+mod sdbm
+
+enum Side {
+  Top = "top"
+  Left = "left"
+  Right = "right"
+  Bottom = "bottom"
+  Front = "front"
+  Back = "back"
+}
+
+struct DoorLocker {
+  Side side
+  num duration
+  str passHash
+}
+
+fn openDoor(Side side, num dur) {
+  rs.setOutput(side, true)
+  sleep(dur)
+  rs.setOutput(side, false)
+}
+
+let config = DoorLocker {
+  side = Side.Left
+  duration = 5
+  passHash = fs.readAll("passwd")
+}
+
+while true {
+  term.clear()
+  term.setCursorPos(1, 1)
+  write("Password: ")
+  let input = read("*")
+  let hash = sdbm.hash(input)
+
+  if hash == config.passHash {
+    term.clear()
+    term.setCursorPos(1, 1)
+    print("Password correct!")
+    openDoor(config.side, config.duration)
+  } else {
+    print("Password incorrect!")
+    sleep(2)
+  }
+}

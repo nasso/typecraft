@@ -1,0 +1,324 @@
+let M = any {}
+
+let keywords = any {}
+keywords["let"] = "let"
+keywords["fn"] = "fn"
+keywords["true"] = "true"
+keywords["false"] = "false"
+keywords["nil"] = "nil"
+keywords["for"] = "for"
+keywords["while"] = "while"
+keywords["if"] = "if"
+keywords["elseif"] = "elseif"
+keywords["else"] = "else"
+keywords["return"] = "return"
+keywords["break"] = "break"
+keywords["continue"] = "continue"
+keywords["pub"] = "pub"
+keywords["mod"] = "mod"
+keywords["const"] = "const"
+keywords["struct"] = "struct"
+keywords["enum"] = "enum"
+keywords["run"] = "run"
+
+let charEscape = any {}
+charEscape['a'] = '\a'
+charEscape['b'] = '\b'
+charEscape['f'] = '\f'
+charEscape['n'] = '\n'
+charEscape['r'] = '\r'
+charEscape['t'] = '\t'
+charEscape['v'] = '\v'
+charEscape['\\'] = '\\'
+charEscape['"'] = '"'
+charEscape['\''] = '\''
+
+fn isDigit(any c) {
+  return c >= '0' && c <= '9'
+}
+
+fn isAlpha(any c) {
+  return
+    (c >= 'a' && c <= 'z') ||
+    (c >= 'A' && c <= 'Z')
+}
+
+fn isAlphaNum(any c) {
+  return isAlpha(c) || isDigit(c)
+}
+
+fn eof(any st) {
+  return st.cur > #st.src
+}
+
+fn peek(any st) {
+  return string.byte(st.src, st.cur)
+}
+
+fn next(any st, any filter) {
+  let c = peek(st)
+
+  if (
+    !c ||
+    (
+      filter &&
+      (type(filter) == "function" && !filter(c)) ||
+      (type(filter) == "number" && c != filter)
+    )
+  ) {
+    return
+  }
+
+  st.cur = st.cur + 1
+
+  if (c == '\n') {
+    st.line = st.line + 1
+    st.col = 1
+  } else {
+    st.col = st.col + 1
+  }
+
+  return c
+}
+
+fn nextWhile(any st, any filter) {
+  let chars = any {}
+  let c = next(st, filter)
+
+  while (c) {
+    chars[#chars + 1] = c
+    c = next(st, filter)
+  }
+
+  return chars
+}
+
+fn addError(any st, any msg) {
+  table.insert(st.errors, any {
+    msg = msg,
+    token = any {
+      line = st.startLine,
+      col = st.startCol,
+      text = string.sub(st.src, st.start, st.cur - 1),
+    },
+  })
+}
+
+fn curText(any st) {
+  return string.sub(st.src, st.start, st.cur - 1),
+}
+
+fn mkToken(any st, any ty, any value) {
+  return any {
+    ty = ty,
+    line = st.startLine,
+    col = st.startCol,
+    text = curText(st),
+    value = value,
+  }
+}
+
+fn scanToken(any st) {
+  let c = next(st)
+
+  if (c == ' ') { return }
+  if (c == '\n') { return }
+  if (c == '\r') { return }
+  if (c == '\t') { return }
+  if (c == ';') {
+    nextWhile(st, fn(any c) {
+      return c != '\n'
+    })
+    return
+  }
+
+  if (c == '(') { return mkToken(st, "(") }
+  if (c == ')') { return mkToken(st, ")") }
+  if (c == '{') { return mkToken(st, "{") }
+  if (c == '}') { return mkToken(st, "}") }
+  if (c == '[') { return mkToken(st, "[") }
+  if (c == ']') { return mkToken(st, "]") }
+  if (c == ',') { return mkToken(st, ",") }
+  if (c == '+') { return mkToken(st, "+") }
+  if (c == '-') { return mkToken(st, "-") }
+  if (c == '*') { return mkToken(st, "*") }
+  if (c == '/') { return mkToken(st, "/") }
+  if (c == '%') { return mkToken(st, "%") }
+  if (c == '#') { return mkToken(st, "#") }
+  if (c == '.') {
+    if (next(st, '.')) {
+      if (next(st, '.')) {
+        return mkToken(st, "...")
+      } else {
+        return mkToken(st, "..")
+      }
+    } else {
+      return mkToken(st, ".")
+    }
+  }
+  if (c == '!') {
+    if (next(st, '=')) {
+      return mkToken(st, "!=")
+    } else {
+      return mkToken(st, "!")
+    }
+  }
+  if (c == '=') {
+    if (next(st, '=')) {
+      return mkToken(st, "==")
+    } else {
+      return mkToken(st, "=")
+    }
+  }
+  if (c == '<') {
+    if (next(st, '=')) {
+      return mkToken(st, "<=")
+    } else {
+      return mkToken(st, "<")
+    }
+  }
+  if (c == '>') {
+    if (next(st, '=')) {
+      return mkToken(st, ">=")
+    } else {
+      return mkToken(st, ">")
+    }
+  }
+  if (c == '&') {
+    if (next(st, '&')) {
+      return mkToken(st, "&&")
+    } else {
+      return mkToken(st, "&")
+    }
+  }
+  if (c == '|') {
+    if (next(st, '|')) {
+      return mkToken(st, "||")
+    } else {
+      return mkToken(st, "|")
+    }
+  }
+  if (c == '\'') {
+    c = next(st)
+    if (c == '\'') {
+      addError(st, "empty char literal")
+      return
+    } elseif (
+      c == '\a' ||
+      c == '\b' ||
+      c == '\f' ||
+      c == '\n' ||
+      c == '\r' ||
+      c == '\t' ||
+      c == '\v'
+    ) {
+      addError(st, "invalid char literal")
+      return
+    } elseif (c == '\\') {
+      let es = next(st)
+      c = charEscape[es]
+      if (!c) {
+        addError(st, "unknown escape sequence: \\" .. es)
+        return
+      }
+    }
+    if (!next(st, '\'')) {
+      addError(st, "expected \"'\" to end char literal")
+      return
+    }
+    return mkToken(st, "char", c)
+  }
+  if (c == '"') {
+    let chars = any {}
+
+    c = next(st)
+    while (!eof(st) && c != '"') {
+      if (
+        c == '\a' ||
+        c == '\b' ||
+        c == '\f' ||
+        c == '\n' ||
+        c == '\r' ||
+        c == '\t' ||
+        c == '\v'
+      ) {
+        addError(st, "invalid string literal")
+        return
+      } elseif (c == '\\') {
+        let es = next(st)
+        c = charEscape[es]
+        if (!c) {
+          addError(st, "unknown escape sequence: \\" .. es)
+          return
+        }
+      }
+      table.insert(chars, string.char(c))
+      c = next(st)
+    }
+    if (c != '"') {
+      addError(st, "unterminated string")
+      return
+    }
+    return mkToken(st, "string", table.concat(chars))
+  }
+  if (isDigit(c)) {
+    let dot = false
+
+    fn filter(any c) {
+      if (isDigit(c)) { return true }
+      if (!dot && c == '.') {
+        dot = true
+        return true
+      }
+      return false
+    }
+
+    nextWhile(st, filter)
+
+    return mkToken(st, "number", tonumber(curText(st)))
+  }
+  if (isAlpha(c) || c == '_') {
+    nextWhile(st, fn(any c) {
+      return isAlphaNum(c) || c == '_'
+    })
+
+    let tk = mkToken(st, "identifier")
+    let kw = keywords[tk.text]
+
+    if (kw) { tk.ty = kw }
+
+    return tk
+  }
+
+  addError(st, "unexpected character")
+}
+
+M.scan = fn(any src) {
+  let tokens = any {}
+  let st = any {
+    src = src,
+    cur = 1,
+    start = 1,
+    startLine = 1,
+    startCol = 1,
+    col = 1,
+    line = 1,
+    errors = any {},
+  }
+
+  while (!eof(st)) {
+    st.start = st.cur
+    st.startLine = st.line
+    st.startCol = st.col
+
+    let token = scanToken(st)
+
+    if (token) {
+      table.insert(tokens, token)
+    }
+  }
+
+  return tokens, st.errors
+}
+
+return M

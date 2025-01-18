@@ -1,0 +1,46 @@
+let path = ...
+
+path = path || "."
+path = shell.resolve(path)
+
+let cap = fs.getCapacity("/")
+let free = fs.getFreeSpace("/")
+let usage = cap - free
+
+if (path != "/") {
+  fn sizeRec(any p) {
+    if (!fs.isDir(p)) {
+      return fs.getSize(p)
+    }
+
+    let total = 0
+    let files = fs.list(p)
+    let i = 1
+    while (i <= #files) {
+      let f = fs.combine(p, files[i])
+      if (f != "rom") {
+        total = total + sizeRec(f)
+      }
+      i = i + 1
+    }
+    return total
+  }
+
+  usage = sizeRec(path)
+}
+
+print("/" .. path)
+print(
+  string.format(
+    "Used: %d bytes (%.2f%% of drive)",
+    usage,
+    (usage / cap) * 100,
+  )
+)
+print(
+  string.format(
+    "Free: %d bytes (%.2f%%)",
+    free,
+    (free / cap) * 100,
+  )
+)

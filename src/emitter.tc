@@ -1,0 +1,266 @@
+let M = any {}
+
+let LUAOPS = any {}
+LUAOPS["pos"]    = ""
+LUAOPS["neg"]    = "-"
+LUAOPS["not"]    = "not "
+LUAOPS["len"]    = "#"
+LUAOPS["add"]    = "+"
+LUAOPS["sub"]    = "-"
+LUAOPS["mul"]    = "*"
+LUAOPS["div"]    = "/"
+LUAOPS["idiv"]   = "//"
+LUAOPS["mod"]    = "%"
+LUAOPS["pow"]    = "^"
+LUAOPS["concat"] = ".."
+LUAOPS["or"]     = " or "
+LUAOPS["and"]    = " and "
+LUAOPS["eq"]     = "=="
+LUAOPS["neq"]    = "~="
+LUAOPS["lte"]    = "<="
+LUAOPS["gte"]    = ">="
+LUAOPS["lt"]     = "<"
+LUAOPS["gt"]     = ">"
+
+M.emit = fn(any h, any block, any pretty) {
+  let st = any {}
+  st.ic = 0
+  st.vars = any {}
+  st.w = fn(any ...) {
+    return h.write(h, table.concat(table.pack(...)))
+  }
+
+  if (pretty) {
+    let nestLvl = 0
+    st.beginStmt = fn() {
+      st.w(string.rep("  ", nestLvl))
+    }
+    st.endStmt = fn() { st.w(";\n") }
+    st.beginBlock = fn() {
+      nestLvl = nestLvl + 1
+      st.w("\n")
+    }
+    st.endBlock = fn() {
+      nestLvl = nestLvl - 1
+      st.w(string.rep("  ", nestLvl))
+    }
+  } else {
+    let nop = fn() {}
+    st.beginStmt = nop
+    st.endStmt = fn() { st.w(";") }
+    st.beginBlock = nop
+    st.endBlock = nop
+  }
+
+  M.emitBlock(st, block)
+}
+
+M.varName = fn(any st, any block, any id) {
+  if (!id) {
+    let var = block
+
+    if (var.ident) { return var.ident }
+
+    block = var.b
+    id = var.i
+  }
+
+  let key = any {}
+
+  while (block.parent) {
+    key[#key + 1] = string.format("%x", block.i)
+    block = block.parent
+  }
+
+  key[#key + 1] = string.format("%x", id)
+  key = table.concat(key, "_")
+
+  let var = st.vars[key]
+  if (var) {
+    return var
+  }
+
+  st.ic = st.ic + 1
+  var = string.format("v%x", st.ic)
+  st.vars[key] = var
+
+  return var
+}
+
+M.emitBlock = fn(any st, any block) {
+  if (#block.stmts > 0 && block.vc >= block.vs) {
+    st.beginStmt()
+    st.w("local ")
+
+    let i = block.vs
+    while (i <= block.vc) {
+      let name = M.varName(st, block, i)
+      st.w(name)
+      if (i < block.vc) { st.w(",") }
+      i = i + 1
+    }
+    st.endStmt()
+  }
+
+  let i = 1
+  while (i <= #block.stmts) {
+    M.emitStatement(st, block.stmts[i])
+    i = i + 1
+  }
+}
+
+M.emitStatement = fn(any st, any stmt) {
+  st.beginStmt()
+  if (stmt.ty == "call") {
+    M.emitCall(st, stmt.expr)
+  } elseif (stmt.ty == "store") {
+    M.emitStore(st, stmt)
+  } elseif (stmt.ty == "return") {
+    st.w("return")
+    let i = 1
+    while (i <= #stmt.exprs) {
+      if (i == 1) {
+        st.w(" ")
+      } else {
+        st.w(",")
+      }
+      M.emitExpr(st, stmt.exprs[i])
+      i = i + 1
+    }
+  } elseif (stmt.ty == "conditional") {
+    let i = 1
+    while (i <= #stmt.branches) {
+      let branch = stmt.branches[i]
+      if (i == 1) {
+        st.w("if ")
+      } elseif (branch.cond) {
+        st.w("elseif ")
+      } else {
+        st.w("else ")
+      }
+      if (branch.cond) {
+        M.emitExpr(st, branch.cond)
+        st.w(" then")
+      }
+      st.beginBlock()
+      M.emitBlock(st, branch.block)
+      st.endBlock()
+      i = i + 1
+    }
+    st.w("end")
+  } elseif (stmt.ty == "while") {
+    st.w("while ")
+    M.emitExpr(st, stmt.cond)
+    st.w(" do")
+    st.beginBlock()
+    M.emitBlock(st, stmt.block)
+    st.endBlock()
+    st.w("end")
+  } else {
+    error("[emit] unsupported statement: '" .. stmt.ty .. "'", 0)
+  }
+  st.endStmt()
+}
+
+M.emitStore = fn(any st, any stmt) {
+  let i = 1
+  while (i <= #stmt.lvals) {
+    let expr = stmt.lvals[i]
+    if (i > 1) { st.w(",") }
+    M.emitExpr(st, expr)
+    i = i + 1
+  }
+
+  st.w("=")
+
+  i = 1
+  while (i <= #stmt.rvals) {
+    let expr = stmt.rvals[i]
+    if (i > 1) { st.w(",") }
+    M.emitExpr(st, expr)
+    i = i + 1
+  }
+}
+
+M.emitExpr = fn(any st, any expr) {
+  if (expr.ty == "literal") {
+    st.w("(", textutils.serialize(expr.value), ")")
+  } elseif (expr.ty == "vararg") {
+    st.w("...")
+  } elseif (expr.ty == "function") {
+    st.w("function(")
+    let i = 1
+    while (i <= #expr.params) {
+      let param = expr.params[i]
+      let paramName = M.varName(st, param)
+      if (i > 1) { st.w(",") }
+      st.w(paramName)
+      i = i + 1
+    }
+    if (expr.variadic) {
+      if (#expr.params > 0) {
+        st.w(",")
+      }
+      st.w("...")
+    }
+    st.w(")")
+    st.beginBlock()
+    M.emitBlock(st, expr.body)
+    st.endBlock()
+    st.w("end")
+  } elseif (expr.ty == "index") {
+    M.emitExpr(st, expr.tbl)
+    st.w("[")
+    M.emitExpr(st, expr.idx)
+    st.w("]")
+  } elseif (expr.ty == "call") {
+    M.emitCall(st, expr)
+  } elseif (expr.ty == "var") {
+    let name = M.varName(st, expr)
+    if (!name) {
+      error("variable '" .. expr.i .. "' doesn't exist", 0)
+    }
+    st.w(name)
+  } elseif (expr.ty == "table") {
+    st.w("{")
+    let i = 1
+    while (i <= #expr.entries) {
+      let entry = expr.entries[i]
+      if (i > 1) { st.w(",") }
+      if (type(entry.key) == "string") {
+        st.w("[", string.format("%q", entry.key), "]=")
+      } elseif (entry.key) {
+        st.w("[")
+        M.emitExpr(st, entry.key)
+        st.w("]=")
+      }
+      M.emitExpr(st, entry.value)
+      i = i + 1
+    }
+    st.w("}")
+  } elseif (expr.ty == "unop") {
+    st.w(LUAOPS[expr.op])
+    M.emitExpr(st, expr.expr)
+  } elseif (expr.ty == "binop") {
+    M.emitExpr(st, expr.lhs)
+    st.w(LUAOPS[expr.op])
+    M.emitExpr(st, expr.rhs)
+  } else {
+    error("[emit] unsupported expression: '" .. expr.ty .. "'", 0)
+  }
+}
+
+M.emitCall = fn(any st, any expr) {
+  M.emitExpr(st, expr.callee)
+  st.w("(")
+  let i = 1
+  while (i <= #expr.args) {
+    let arg = expr.args[i]
+    if (i > 1) { st.w(",") }
+    M.emitExpr(st, arg)
+    i = i + 1
+  }
+  st.w(")")
+}
+
+return M

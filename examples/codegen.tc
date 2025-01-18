@@ -1,0 +1,16 @@
+        if (op == "+" ) { return ir.add   (lhs, rhs) }
+    elseif (op == "-" ) { return ir.sub   (lhs, rhs) }
+    elseif (op == "*" ) { return ir.mul   (lhs, rhs) }
+    elseif (op == "/" ) { return ir.div   (lhs, rhs) }
+    elseif (op == "//") { return ir.idiv  (lhs, rhs) }
+    elseif (op == "%" ) { return ir.mod   (lhs, rhs) }
+    elseif (op == "^" ) { return ir.pow   (lhs, rhs) }
+    elseif (op == "..") { return ir.concat(lhs, rhs) }
+    elseif (op == "||") { return ir.or    (lhs, rhs) }
+    elseif (op == "&&") { return ir.and   (lhs, rhs) }
+    elseif (op == "==") { return ir.eq    (lhs, rhs) }
+    elseif (op == "!=") { return ir.neq   (lhs, rhs) }
+    elseif (op == "<=") { return ir.lte   (lhs, rhs) }
+    elseif (op == ">=") { return ir.gte   (lhs, rhs) }
+    elseif (op == "<" ) { return ir.lt    (lhs, rhs) }
+    elseif (op == ">" ) { return ir.gt    (lhs, rhs) }

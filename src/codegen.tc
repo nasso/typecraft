@@ -1,0 +1,289 @@
+let M = any {}
+
+let ir = require("ir")
+let scope = require("scope")
+
+M.lower = fn(any module) {
+  let modBlock = ir.block()
+  let modTbl = nil
+
+  let lastStmt = module.stmts[#module.stmts]
+  if (lastStmt && lastStmt.ty != "return_stmt") {
+    modTbl = ir.var(modBlock)
+  }
+
+  let st = any {}
+  st.globalScope = scope.new()
+  st.rootBlock = modBlock
+  st.scope = st.globalScope
+  st.b = st.rootBlock
+
+  M.genBlock(st, module.stmts, modTbl)
+
+  if (modTbl) {
+    ir.ret(modBlock, any { modTbl })
+  }
+
+  return modBlock
+}
+
+M.genBlock = fn(any st, any stmts, any modTbl) {
+  let i = 1
+  while (i <= #stmts) {
+    let stmt = stmts[i]
+    M.genStatement(st, stmt, modTbl)
+    i = i + 1
+  }
+}
+
+M.genStatement = fn(any st, any stmt, any modTbl) {
+  if (stmt.ty == "let_stmt") {
+    return M.genLetStmt(st, stmt, modTbl)
+  } elseif (stmt.ty == "fn_stmt") {
+    return M.genFnStmt(st, stmt, modTbl)
+  } elseif (stmt.ty == "call_stmt") {
+    let call = M.genCall(st, stmt.expr)
+    ir.callStmt(st.b, call)
+  } elseif (stmt.ty == "return_stmt") {
+    let exprs = any {}
+
+    let i = 1
+    while (i <= #stmt.exprs) {
+      exprs[#exprs + 1] = M.genExpression(st, stmt.exprs[i])
+      i = i + 1
+    }
+
+    ir.ret(st.b, exprs)
+  } elseif (stmt.ty == "assign_stmt") {
+    let lvals = any {}
+    let rvals = any {}
+
+    let i = 1
+    while (i <= #stmt.lvalues) {
+      lvals[#lvals + 1] = M.genExpression(st, stmt.lvalues[i])
+      i = i + 1
+    }
+    i = 1
+    while (i <= #stmt.rvalues) {
+      rvals[#rvals + 1] = M.genExpression(st, stmt.rvalues[i])
+      i = i + 1
+    }
+
+    ir.storeAll(st.b, lvals, rvals)
+  } elseif (stmt.ty == "if_stmt") {
+    let initBlock = st.b
+    let initScope = st.scope
+    let branches = any {}
+    let i = 1
+    while (i <= #stmt.clauses) {
+      let clause = stmt.clauses[i]
+
+      st.b = initBlock
+      st.scope = initScope
+
+      let cond = nil
+      if (clause.cond) {
+        cond = M.genExpression(st, clause.cond)
+      }
+
+      let thenBlock = ir.block(st.b)
+      let thenScope = scope.new(st.scope)
+      st.b = thenBlock
+      st.scope = thenScope
+
+      M.genBlock(st, clause.then)
+      branches[#branches + 1] = ir.branch(cond, thenBlock)
+      i = i + 1
+    }
+    st.b = initBlock
+    st.scope = initScope
+    ir.conditional(st.b, branches)
+  } elseif (stmt.ty == "while_stmt") {
+    let cond = M.genExpression(st, stmt.expr)
+    let block = ir.block(st.b)
+
+    st.b = block
+    M.genBlock(st, stmt.block)
+    st.b = st.b.parent
+
+    ir.loopWhile(st.b, cond, block)
+  } else {
+    error("[codegen] unsupported statement: " .. stmt.ty, 0)
+  }
+}
+
+M.genLetStmt = fn(any st, any stmt, any modTbl) {
+  let vars = ir.vars(st.b, #stmt.idents)
+  let exprs = any {}
+
+  let i = 1
+  while (i <= #stmt.exprs) {
+    exprs[i] = M.genExpression(st, stmt.exprs[i])
+    i = i + 1
+  }
+
+  i = 1
+  while (i <= #stmt.idents) { 
+    let ident = stmt.idents[i]
+    scope.set(st.scope, ident.text, vars[i])
+    i = i + 1
+  }
+
+  ir.storeAll(st.b, vars, exprs)
+
+  if (modTbl && stmt.public) {
+    let refs = any {}
+    let i = 1
+    while (i <= #stmt.idents) {
+      let ident = stmt.idents[i]
+      refs[i] = ir.index(modTbl, ir.lit(ident.text))
+      i = i + 1
+    }
+    ir.storeAll(st.b, refs, vars)
+  }
+}
+
+M.genFnStmt = fn(any st, any stmt, any modTbl) {
+  let func = M.genFnExpr(st, stmt)
+
+  let funcVar = ir.var(st.b)
+  ir.storeOne(st.b, funcVar, func)
+  scope.set(st.scope, stmt.ident.text, funcVar)
+
+  if (modTbl && stmt.public) {
+    ir.storeOne(
+      st.b,
+      ir.index(modTbl, ir.lit(stmt.ident.text)),
+      funcVar,
+    )
+  }
+}
+
+M.genExpression = fn(any st, any expr) {
+  if (expr.ty == "nil_lit") {
+    return ir.lit(nil)
+  } elseif (expr.ty == "number_lit") {
+    return ir.lit(expr.value)
+  } elseif (expr.ty == "bool_lit") {
+    return ir.lit(expr.value)
+  } elseif (expr.ty == "char_lit") {
+    return ir.lit(expr.value)
+  } elseif (expr.ty == "string_lit") {
+    return ir.lit(expr.value)
+  } elseif (expr.ty == "spread_lit") {
+    return ir.vararg()
+  } elseif (expr.ty == "identifier") {
+    let var = scope.get(st.scope, expr.text)
+    if (!var) {
+      print("W: implicit declaration of '" .. expr.text .. "'")
+      var = ir.var(st.rootBlock, any { globalIdent = expr.text })
+      scope.set(st.globalScope, expr.text, var)
+    }
+    return var
+  } elseif (expr.ty == "table_expr") {
+    let pairs = any {}
+    let i = 1
+    while (i <= #expr.pairs) {
+      let pair = expr.pairs[i]
+      let key = pair.key
+      let value = M.genExpression(st, pair.value)
+
+      if (pair.keyExpr) {
+        key = M.genExpression(st, pair.keyExpr)
+      }
+
+      pairs[#pairs + 1] = ir.tableEntry(key, value)
+      i = i + 1
+    }
+    return ir.tableConstructor(pairs)
+  } elseif (expr.ty == "fn_expr") {
+    let func = M.genFnExpr(st, expr)
+    return func
+  } elseif (expr.ty == "unop_expr") {
+    let op = expr.op.ty
+    let expr = M.genExpression(st, expr.expr)
+
+        if (op == "+" ) { return ir.pos(expr) }
+    elseif (op == "-" ) { return ir.neg(expr) }
+    elseif (op == "!" ) { return ir.not(expr) }
+    elseif (op == "#" ) { return ir.len(expr) }
+    else {
+      error("[codegen] unsupported unary operator: '" .. op .. "'", 0)
+    }
+  } elseif (expr.ty == "binop_expr") {
+    let lhs = M.genExpression(st, expr.lhs)
+    let op = expr.op.ty
+    let rhs = M.genExpression(st, expr.rhs)
+
+        if (op == "+" ) { return ir.add   (lhs, rhs) }
+    elseif (op == "-" ) { return ir.sub   (lhs, rhs) }
+    elseif (op == "*" ) { return ir.mul   (lhs, rhs) }
+    elseif (op == "/" ) { return ir.div   (lhs, rhs) }
+    elseif (op == "//") { return ir.idiv  (lhs, rhs) }
+    elseif (op == "%" ) { return ir.mod1  (lhs, rhs) }
+    elseif (op == "^" ) { return ir.pow   (lhs, rhs) }
+    elseif (op == "..") { return ir.concat(lhs, rhs) }
+    elseif (op == "||") { return ir.or    (lhs, rhs) }
+    elseif (op == "&&") { return ir.and   (lhs, rhs) }
+    elseif (op == "==") { return ir.eq    (lhs, rhs) }
+    elseif (op == "!=") { return ir.neq   (lhs, rhs) }
+    elseif (op == "<=") { return ir.lte   (lhs, rhs) }
+    elseif (op == ">=") { return ir.gte   (lhs, rhs) }
+    elseif (op == "<" ) { return ir.lt    (lhs, rhs) }
+    elseif (op == ">" ) { return ir.gt    (lhs, rhs) }
+    else {
+      error("[codegen] unsupported binary operator: '" .. op .. "'", 0)
+    }
+  } elseif (expr.ty == "member_expr") {
+    return ir.index(
+      M.genExpression(st, expr.expr),
+      ir.lit(expr.ident.text),
+    )
+  } elseif (expr.ty == "index_expr") {
+    return ir.index(
+      M.genExpression(st, expr.expr),
+      M.genExpression(st, expr.index),
+    )
+  } elseif (expr.ty == "call_expr") {
+    return M.genCall(st, expr)
+  } else {
+    error("[codegen] unsupported statement: '" .. expr.ty .. "'", 0)
+  }
+}
+
+M.genCall = fn(any st, any expr) {
+  let callee = M.genExpression(st, expr.callee)
+  let args = any {}
+  let i = 1
+  while (i <= #expr.args) {
+    let arg = expr.args[i]
+    args[i] = M.genExpression(st, arg)
+    i = i + 1
+  }
+  return ir.call(callee, args)
+}
+
+M.genFnExpr = fn(any st, any expr) {
+  let func = ir.function(st.b, #expr.params)
+
+  func.variadic = expr.variadic
+
+  st.b = func.body
+  st.scope = scope.new(st.scope)
+
+  let i = 1
+  while (i <= #expr.params) {
+    let param = expr.params[i]
+    scope.set(st.scope, param.ident.text, func.params[i])
+    i = i + 1
+  }
+
+  M.genBlock(st, expr.body)
+
+  st.b = st.b.parent
+  st.scope = st.scope.parent
+
+  return func
+}
+
+return M

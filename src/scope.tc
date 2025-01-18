@@ -1,0 +1,27 @@
+let M = any {}
+
+M.new = fn(any parent) {
+  let scope = any {}
+  scope.parent = parent
+  scope.vars = any {}
+
+  return scope
+}
+
+M.get = fn(any s, any k) {
+  let v = nil
+
+  while (!v && s) {
+    v = s.vars[k]
+    s = s.parent
+  }
+
+  return v
+}
+
+M.set = fn(any s, any k, any v) {
+  assert(v, "value mustn't be nil")
+  s.vars[k] = v
+}
+
+return M
