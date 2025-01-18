@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## tcc 0.2.2
+
+- fix: crash when missing the `)` in a function call inside a block
+
 ## tcc 0.2.1
 
 - feat: add `for` and `for..in` loop statements

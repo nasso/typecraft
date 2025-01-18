@@ -84,7 +84,7 @@ fn sync(any st, any ...) {
   if (!st.panic) { return }
   st.panic = false
 
-  while (!peek(st, ...)) {
+  while (!eof(st) && !peek(st, ...)) {
     if (!next(st)) { return }
   }
 }
@@ -344,14 +344,14 @@ M.postfixExpr = fn(any st) {
     } elseif (next(st, "(")) {
       let args = any {}
 
-      while (!next(st, ")")) {
+      while (!eof(st) && !next(st, ")")) {
         let arg = M.expression(st)
         if (!arg) { return }
 
         args[#args + 1] = arg
 
         if (!peek(st, ")")) {
-          expect(st, ",")
+          if (!expect(st, ",")) { return }
         }
       }
 
@@ -486,7 +486,7 @@ M.primaryExpr = fn(any st) {
 
     let pairs = any {}
 
-    while (!next(st, "}")) {
+    while (!eof(st) && !next(st, "}")) {
       let key = nil
       let keyExpr = nil
       let val = nil
@@ -525,7 +525,7 @@ M.primaryExpr = fn(any st) {
       }
 
       if (!peek(st, "}")) {
-        expect(st, ",")
+        if (!expect(st, ",")) { return }
       }
     }
 
@@ -555,7 +555,7 @@ M.fnBody = fn(any st) {
 
   let isVariadic = false
   let params = any {}
-  while (!next(st, ")")) {
+  while (!eof(st) && !next(st, ")")) {
     let param = any {}
 
     if (next(st, "...")) {
@@ -593,15 +593,19 @@ M.block = fn(any st) {
 
   let stmts = any {}
 
-  while (!peek(st, "}", "return")) {
-    stmts[#stmts + 1] = M.statement(st)
+  while (!eof(st) && !peek(st, "}", "return")) {
+    let stmt = M.statement(st)
+    if (!stmt) { return }
 
+    stmts[#stmts + 1] = stmt
     sync(st, "let", "fn", "if", "while", "for", "break", "continue",
       "return")
   }
 
   if (peek(st, "return")) {
-    stmts[#stmts + 1] = M.returnStmt(st)
+    let stmt = M.returnStmt(st)
+    if (!stmt) { return }
+    stmts[#stmts + 1] = stmt
   }
 
   if (!expect(st, "}")) { return }
