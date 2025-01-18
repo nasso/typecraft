@@ -66,7 +66,15 @@ fn expect(any st, any ...) {
   if (#tys == 0) {
     addError(st, "unexpected eof")
   } elseif (#tys == 1) {
-    addError(st, "expected " .. tys[1])
+    let t = peek(st)
+    if (tys[1] == "identifier" && t && t.keyword) {
+      addError(
+        st,
+        "'" .. t.text .. "' is a reserved keyword",
+      )
+    } else {
+      addError(st, "expected " .. tys[1])
+    }
   } else {
     addError(st, "expected one of: " .. table.concat(tys, ", "))
   }
@@ -138,6 +146,9 @@ M.moduleStmt = fn(any st) {
     if (!decl) { return }
     decl.public = pubToken != nil
     return decl
+  } elseif (pubToken) {
+    addError(st, "expected `let` or `fn` here")
+    return
   }
 
   return M.statement(st)
@@ -224,13 +235,13 @@ M.statement = fn(any st) {
   return stmt
 }
 
-M.letStmt = fn(any st) {
+M.letStmt = fn(st: any) {
   expect(st, "let")
 
   let idents = any {}
-  idents[1] = next(st, "identifier")
+  idents[1] = expect(st, "identifier")
   while (next(st, ",")) {
-    idents[#idents + 1] = next(st, "identifier")
+    idents[#idents + 1] = expect(st, "identifier")
   }
 
   let exprs = any {}
@@ -486,6 +497,10 @@ M.primaryExpr = fn(any st) {
     return expr
   } elseif (peek(st, "(")) {
     return M.parenExpr(st)
+  } elseif (peek(st, "{")) {
+    addError(st, "unexpected token (did you mean 'any {'?)")
+  } else {
+    addError(st, "unexpected token")
   }
 }
 
@@ -508,6 +523,7 @@ M.fnBody = fn(any st) {
       isVariadic = true
     } else {
       param.ident = expect(st, "identifier")
+      if (!param.ident) { return }
 
       if (next(st, ":")) {
         param.type = M.typeExpr(st)
@@ -516,12 +532,15 @@ M.fnBody = fn(any st) {
         isVariadic = true
       } else {
         param.type = param.ident
-        param.ident = expect(st, "identifier")
+        param.ident = next(st, "identifier")
+        if (!param.ident) {
+          addError(st, "unexpected token (did you forget the type?)")
+        }
         params[#params + 1] = param
       }
     }
     if (!peek(st, ")")) {
-      expect(st, ",")
+      if (!expect(st, ",")) { return }
     }
   }
 
@@ -531,7 +550,7 @@ M.fnBody = fn(any st) {
 }
 
 M.block = fn(any st) {
-  expect(st, "{")
+  if (!expect(st, "{")) { return }
 
   let stmts = any {}
 
@@ -546,7 +565,7 @@ M.block = fn(any st) {
     stmts[#stmts + 1] = M.returnStmt(st)
   }
 
-  expect(st, "}")
+  if (!expect(st, "}")) { return }
 
   return stmts
 }

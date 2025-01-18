@@ -13,12 +13,12 @@ enum Side {
 }
 
 struct DoorLocker {
-  Side side
-  num duration
-  str passHash
+  side: Side
+  duration: number
+  passHash: string
 }
 
-fn openDoor(Side side, num dur) {
+fn openDoor(side: Side, dur: number) {
   rs.setOutput(side, true)
   sleep(dur)
   rs.setOutput(side, false)
@@ -30,14 +30,14 @@ let config = DoorLocker {
   passHash = fs.readAll("passwd")
 }
 
-while true {
+while (true) {
   term.clear()
   term.setCursorPos(1, 1)
   write("Password: ")
   let input = read("*")
   let hash = sdbm.hash(input)
 
-  if hash == config.passHash {
+  if (hash == config.passHash) {
     term.clear()
     term.setCursorPos(1, 1)
     print("Password correct!")

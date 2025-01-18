@@ -147,11 +147,12 @@ M.genLetStmt = fn(any st, any stmt, any modTbl) {
 }
 
 M.genFnStmt = fn(any st, any stmt, any modTbl) {
+  let funcVar = ir.var(st.b)
+  scope.set(st.scope, stmt.ident.text, funcVar)
+
   let func = M.genFnExpr(st, stmt)
 
-  let funcVar = ir.var(st.b)
   ir.storeOne(st.b, funcVar, func)
-  scope.set(st.scope, stmt.ident.text, funcVar)
 
   if (modTbl && stmt.public) {
     ir.storeOne(
@@ -266,7 +267,7 @@ M.genCall = fn(any st, any expr) {
   return ir.call(callee, args)
 }
 
-M.genFnExpr = fn(any st, any expr) {
+M.genFnExpr = fn(st: any, expr: any) {
   let func = ir.function(st.b, #expr.params)
 
   func.variadic = expr.variadic

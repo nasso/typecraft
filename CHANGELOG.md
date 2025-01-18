@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## tcc 0.2.0
+
+- feat!: add reserved keyword `in`
+- feat: new error message when a reserved keyword is used as an identifier
+- feat: support hex literals
+- fix: crash when missing `{` after an `if` condition
+- fix: crash when missing `fn` or `let` after `pub`
+- fix: functions unable to call themselves
+- fix: crash when parsing malformed expression `{}`
+- fix: crash when parsing parameters without a type
+- fix: parenthesised expressions not taking priority
+
 ## tcc 0.1.2
 
 - feat: function parameters can now have a type (will be required later)

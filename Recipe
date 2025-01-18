@@ -1,0 +1,11 @@
+target "tcc"
+  files {
+    entry "src/main.tc",
+    "src/utils.tc",
+    "src/lexer.tc",
+    "src/parser.tc",
+    "src/codegen.tc",
+    "src/scope.tc",
+    "src/ir.tc",
+    "src/emitter.tc",
+  }

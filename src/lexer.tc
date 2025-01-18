@@ -1,5 +1,3 @@
-let M = any {}
-
 let keywords = any {}
 keywords["let"] = "let"
 keywords["fn"] = "fn"
@@ -7,6 +5,7 @@ keywords["true"] = "true"
 keywords["false"] = "false"
 keywords["nil"] = "nil"
 keywords["for"] = "for"
+keywords["in"] = "in"
 keywords["while"] = "while"
 keywords["if"] = "if"
 keywords["elseif"] = "elseif"
@@ -263,18 +262,29 @@ fn scanToken(any st) {
     return mkToken(st, "string", table.concat(chars))
   }
   if (isDigit(c)) {
-    let dot = false
-
-    fn filter(any c) {
-      if (isDigit(c)) { return true }
-      if (!dot && c == '.') {
-        dot = true
-        return true
+    if (c == '0' && next(st, 'x')) {
+      fn filter(c: any) {
+        if (isDigit(c)) { return true }
+        if (c >= 'a' && c <= 'f') { return true }
+        if (c >= 'A' && c <= 'F') { return true }
+        return false
       }
-      return false
-    }
 
-    nextWhile(st, filter)
+      nextWhile(st, filter)
+    } else {
+      let dot = false
+
+      fn filter(c: any) {
+        if (isDigit(c)) { return true }
+        if (!dot && c == '.') {
+          dot = true
+          return true
+        }
+        return false
+      }
+
+      nextWhile(st, filter)
+    }
 
     return mkToken(st, "number", tonumber(curText(st)))
   }
@@ -286,7 +296,10 @@ fn scanToken(any st) {
     let tk = mkToken(st, "identifier")
     let kw = keywords[tk.text]
 
-    if (kw) { tk.ty = kw }
+    if (kw) {
+      tk.ty = kw
+      tk.keyword = true
+    }
 
     return tk
   }
@@ -294,7 +307,7 @@ fn scanToken(any st) {
   addError(st, "unexpected character")
 }
 
-M.scan = fn(any src) {
+pub fn scan(src: any) {
   let tokens = any {}
   let st = any {
     src = src,
@@ -321,5 +334,3 @@ M.scan = fn(any src) {
 
   return tokens, st.errors
 }
-
-return M

@@ -1,6 +1,4 @@
-let M = any {}
-
-M.split = fn(any txt, any chr) {
+pub fn split(txt: any, chr: any) {
   let lines = any {}
   let i, j = 1, string.find(txt, chr, 1, true)
 
@@ -17,7 +15,7 @@ M.split = fn(any txt, any chr) {
   return lines
 }
 
-M.ttyRead = fn() {
+pub fn ttyRead() {
   let lines = any {}
 
   parallel.waitForAny(
@@ -50,12 +48,12 @@ M.ttyRead = fn() {
   return table.concat(lines, "\n")
 }
 
-M.ttyDisplay = fn(any txt) {
+pub fn ttyDisplay(txt: any) {
   let w, h = term.getSize()
   let running = true
   let scrollX = 0
   let scrollY = 0
-  let lines = M.split(txt, "\n")
+  let lines = split(txt, "\n")
 
   term.setCursorBlink(false)
 
@@ -102,7 +100,7 @@ M.ttyDisplay = fn(any txt) {
   term.setCursorPos(1, 1)
 }
 
-M.openHandle = fn(any path) {
+pub fn openHandle(path: any) {
   if (path == "-") {
     return io.stdout
   }
@@ -114,5 +112,3 @@ M.openHandle = fn(any path) {
 
   return h
 }
-
-return M
