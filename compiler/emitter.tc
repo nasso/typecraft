@@ -1,76 +1,118 @@
 let M = any {}
 
-let LUAOPS = any {}
-LUAOPS["pos"]    = ""
-LUAOPS["neg"]    = "-"
-LUAOPS["not"]    = "not "
-LUAOPS["len"]    = "#"
-LUAOPS["add"]    = "+"
-LUAOPS["sub"]    = "-"
-LUAOPS["mul"]    = "*"
-LUAOPS["div"]    = "/"
-LUAOPS["idiv"]   = "//"
-LUAOPS["mod"]    = "%"
-LUAOPS["pow"]    = "^"
-LUAOPS["concat"] = ".."
-LUAOPS["or"]     = " or "
-LUAOPS["and"]    = " and "
-LUAOPS["eq"]     = "=="
-LUAOPS["neq"]    = "~="
-LUAOPS["lte"]    = "<="
-LUAOPS["gte"]    = ">="
-LUAOPS["lt"]     = "<"
-LUAOPS["gt"]     = ">"
+let LUA_OPS = any {
+  ["pos"]    = "",
+  ["neg"]    = "-",
+  ["not"]    = "not ",
+  ["len"]    = "#",
+  ["add"]    = "+",
+  ["sub"]    = "-",
+  ["mul"]    = "*",
+  ["div"]    = "/",
+  ["idiv"]   = "//",
+  ["mod"]    = "%",
+  ["pow"]    = "^",
+  ["concat"] = "..",
+  ["or"]     = " or ",
+  ["and"]    = " and ",
+  ["eq"]     = "==",
+  ["neq"]    = "~=",
+  ["lte"]    = "<=",
+  ["gte"]    = ">=",
+  ["lt"]     = "<",
+  ["gt"]     = ">",
+}
 
-fn getVarName(st: any, block: any, id: any, implicit: any) {
+let LUA_RESERVED = any {
+  ["and"]      = true,
+  ["break"]    = true,
+  ["do"]       = true,
+  ["else"]     = true,
+  ["elseif"]   = true,
+  ["end"]      = true,
+  ["false"]    = true,
+  ["for"]      = true,
+  ["function"] = true,
+  ["goto"]     = true,
+  ["if"]       = true,
+  ["in"]       = true,
+  ["local"]    = true,
+  ["nil"]      = true,
+  ["not"]      = true,
+  ["or"]       = true,
+  ["repeat"]   = true,
+  ["return"]   = true,
+  ["then"]     = true,
+  ["true"]     = true,
+  ["until"]    = true,
+  ["while"]    = true,
+}
+
+fn isSafeLuaName(name: any) {
+  if (LUA_RESERVED[name]) { return false }
+  if (!string.match(name, "^%a[%w_]*$")) { return false }
+
+  return true
+}
+
+let IDENT_TYPE_VAR = 1
+let IDENT_TYPE_IMPLICIT = 2
+let IDENT_TYPE_LABEL = 3
+
+fn genIdentifier(st: any, block: any, id: any) {
+  let identType = IDENT_TYPE_VAR
+
   if (!id) {
+    ; --> genIdentifier(st, var)
+
     let var = block
 
     if (var.ident) { return var.ident }
 
     block = var.b
     id = var.i
-    implicit = var.implicit || false
-  } else {
-    implicit = implicit || false
+    if (var.ty == "label") {
+      identType = IDENT_TYPE_LABEL
+    } elseif (var.implicit) {
+      identType = IDENT_TYPE_IMPLICIT
+    }
   }
 
-  let key = any {}
-
-  if (implicit) { key[#key + 1] = "i" }
-  key[#key + 1] = ":"
+  let key = any { string.format("%x.%x", identType, id) }
 
   while (block.parent) {
-    key[#key + 1] = string.format("%x.", block.i)
+    key[#key + 1] = string.format(".%x", block.i)
     block = block.parent
   }
 
-  key[#key + 1] = string.format("%x", id)
   key = table.concat(key)
 
-  let var = st.vars[key]
-  if (var) {
-    return var
-  }
+  let ident = st.idents[key]
+  if (ident) { return ident }
 
-  if (implicit) {
-    st.iic = st.iic + 1
-    var = string.format("i_%x", st.iic)
-  } else {
+  if (identType == IDENT_TYPE_VAR) {
+    st.vc = st.vc + 1
+    ident = string.format("v_%x", st.vc)
+  } elseif (identType == IDENT_TYPE_IMPLICIT) {
     st.ic = st.ic + 1
-    var = string.format("v_%x", st.ic)
+    ident = string.format("i_%x", st.ic)
+  } elseif (identType == IDENT_TYPE_LABEL) {
+    st.lc = st.lc + 1
+    ident = string.format("l_%x", st.lc)
+  } else {
+    error("unknown identifier type: " .. identType, 0)
   }
 
-  st.vars[key] = var
-
-  return var
+  st.idents[key] = ident
+  return ident
 }
 
 M.emit = fn(any h, any block, any pretty) {
   let st = any {}
+  st.vc = 0
   st.ic = 0
-  st.iic = 0
-  st.vars = any {}
+  st.lc = 0
+  st.idents = any {}
   st.w = fn(any ...) {
     return h.write(h, table.concat(table.pack(...)))
   }
@@ -107,7 +149,7 @@ M.emitBlock = fn(any st, any block) {
 
     let i = 1
     while (i <= block.vc) {
-      let name = getVarName(st, block, i)
+      let name = genIdentifier(st, block, i)
       st.w(name)
       if (i < block.vc) { st.w(",") }
       i = i + 1
@@ -117,29 +159,28 @@ M.emitBlock = fn(any st, any block) {
 
   let i = 1
   while (i <= #block.stmts) {
-    M.emitStatement(st, block.stmts[i])
+    M.emitStatement(st, block.stmts[i], i == #block.stmts)
     i = i + 1
   }
 }
 
-M.emitStatement = fn(any st, any stmt) {
+M.emitStatement = fn(st: any, stmt: any, tail: any) {
   st.beginStmt()
   if (stmt.ty == "call") {
     M.emitCall(st, stmt.expr)
   } elseif (stmt.ty == "store") {
     M.emitStore(st, stmt)
   } elseif (stmt.ty == "return") {
-    st.w("return")
+    if (!tail) { st.w("do return") }
+    else       { st.w("return") }
     let i = 1
     while (i <= #stmt.exprs) {
-      if (i == 1) {
-        st.w(" ")
-      } else {
-        st.w(",")
-      }
+      if (i == 1) { st.w(" ") }
+      else        { st.w(",") }
       M.emitExpr(st, stmt.exprs[i])
       i = i + 1
     }
+    if (!tail) { st.w(" end") }
   } elseif (stmt.ty == "conditional") {
     let i = 1
     while (i <= #stmt.branches) {
@@ -202,6 +243,15 @@ M.emitStatement = fn(any st, any stmt) {
     st.w("end")
   } elseif (stmt.ty == "break") {
     st.w("break")
+  } elseif (stmt.ty == "label") {
+    let name = genIdentifier(st, stmt)
+    if (!name) {
+      error("label '" .. stmt.i .. "' doesn't exist", 0)
+    }
+    st.w("::", name, "::")
+  } elseif (stmt.ty == "goto") {
+    let name = genIdentifier(st, stmt.label)
+    st.w("goto ", name)
   } else {
     error("[emit] unsupported statement: '" .. stmt.ty .. "'", 0)
   }
@@ -238,7 +288,7 @@ M.emitExpr = fn(any st, any expr) {
     let i = 1
     while (i <= #expr.params) {
       let param = expr.params[i]
-      let paramName = getVarName(st, param)
+      let paramName = genIdentifier(st, param)
       if (i > 1) { st.w(",") }
       st.w(paramName)
       i = i + 1
@@ -256,19 +306,27 @@ M.emitExpr = fn(any st, any expr) {
     st.w("end")
   } elseif (expr.ty == "index") {
     M.emitExpr(st, expr.tbl)
-    st.w("[")
-    M.emitExpr(st, expr.idx)
-    st.w("]")
+    if (
+      expr.idx.ty == "literal" &&
+      type(expr.idx.value) == "string" &&
+      isSafeLuaName(expr.idx.value)
+    ) {
+      st.w(".", expr.idx.value)
+    } else {
+      st.w("[")
+      M.emitExpr(st, expr.idx)
+      st.w("]")
+    }
   } elseif (expr.ty == "call") {
     M.emitCall(st, expr)
   } elseif (expr.ty == "var") {
-    let name = getVarName(st, expr)
+    let name = genIdentifier(st, expr)
     if (!name) {
       error("variable '" .. expr.i .. "' doesn't exist", 0)
     }
     st.w(name)
   } elseif (expr.ty == "table") {
-    st.w("{")
+    st.w("({")
     let i = 1
     while (i <= #expr.entries) {
       let entry = expr.entries[i]
@@ -283,16 +341,16 @@ M.emitExpr = fn(any st, any expr) {
       M.emitExpr(st, entry.value)
       i = i + 1
     }
-    st.w("}")
+    st.w("})")
   } elseif (expr.ty == "unop") {
     st.w("(")
-    st.w(LUAOPS[expr.op])
+    st.w(LUA_OPS[expr.op])
     M.emitExpr(st, expr.expr)
     st.w(")")
   } elseif (expr.ty == "binop") {
     st.w("(")
     M.emitExpr(st, expr.lhs)
-    st.w(LUAOPS[expr.op])
+    st.w(LUA_OPS[expr.op])
     M.emitExpr(st, expr.rhs)
     st.w(")")
   } else {

@@ -42,6 +42,33 @@ M.genStatement = fn(any st, any stmt, any modTbl) {
     return M.genLetStmt(st, stmt, modTbl)
   } elseif (stmt.ty == "fn_stmt") {
     return M.genFnStmt(st, stmt, modTbl)
+  } elseif (stmt.ty == "run_stmt") {
+    ; require("_rt").queue(<callee>, any { <args> })
+    let callee = M.genExpression(st, stmt.call.callee)
+    if (!callee) { return }
+
+    let argPairs = any {}
+    for (i = 1, #stmt.call.args) {
+      let arg = stmt.call.args[i]
+      argPairs[i] = ir.tableEntry(nil, M.genExpression(st, arg))
+      if (!argPairs[i]) { return }
+    }
+
+    let args = ir.tableConstructor(argPairs)
+
+    ir.callStmt(
+      st.b,
+      ir.call(
+        ir.index(
+          ir.call(
+            ir.var(st.b, any { globalIdent = "require" }),
+            any { ir.lit("_rt") },
+          ),
+          ir.lit("queue"),
+        ),
+        any { callee, args },
+      ),
+    )
   } elseif (stmt.ty == "call_stmt") {
     let call = M.genCall(st, stmt.expr)
     ir.callStmt(st.b, call)
@@ -102,54 +129,70 @@ M.genStatement = fn(any st, any stmt, any modTbl) {
     ir.conditional(st.b, branches)
   } elseif (stmt.ty == "while_stmt") {
     let cond = M.genExpression(st, stmt.expr)
-    let block, scope = ir.block(st.b), scope.new(st.scope)
-    let init_block, init_scope = st.b, st.scope
+    let loopBlock = M.genLoopBody(st, stmt.block)
 
-    st.b = block
-    st.scope = scope
-    M.genBlock(st, stmt.block)
-    st.b = init_block
-    st.scope = init_scope
-
-    ir.loopWhile(st.b, cond, block)
+    ir.loopWhile(st.b, cond, loopBlock)
   } elseif (stmt.ty == "for_stmt") {
     let init = M.genExpression(st, stmt.init)
     let limit = M.genExpression(st, stmt.limit)
     let step = stmt.step && M.genExpression(st, stmt.step)
-    let for_block, for_scope = ir.block(st.b), scope.new(st.scope)
-    let var = ir.var(for_block, any { implicit = true })
+    let forBlock = ir.block(st.b)
+    let forScope = scope.new(st.scope)
+    let var = ir.var(forBlock, any { implicit = true })
 
-    scope.set(for_scope, stmt.var.text, var)
-
-    let init_block, init_scope = st.b, st.scope
-    st.b, st.scope = for_block, for_scope
-    M.genBlock(st, stmt.block)
-    st.b, st.scope = init_block, init_scope
-
-    ir.loopFor(st.b, var, init, limit, step, for_block)
+    scope.set(forScope, stmt.var.text, var)
+    M.genLoopBody(st, stmt.block, forBlock, forScope)
+    ir.loopFor(st.b, var, init, limit, step, forBlock)
   } elseif (stmt.ty == "for_in_stmt") {
     let expr = M.genExpression(st, stmt.expr)
-    let for_block, for_scope = ir.block(st.b), scope.new(st.scope)
-    let vars = ir.vars(for_block, #stmt.vars, any { implicit = true })
+    let forBlock = ir.block(st.b)
+    let forScope = scope.new(st.scope)
+    let vars = ir.vars(forBlock, #stmt.vars, any { implicit = true })
 
     let i = 1
     while (i <= #stmt.vars) {
       let ident = stmt.vars[i]
-      scope.set(for_scope, ident.text, vars[i])
+      scope.set(forScope, ident.text, vars[i])
       i = i + 1
     }
 
-    let init_block, init_scope = st.b, st.scope
-    st.b, st.scope = for_block, for_scope
-    M.genBlock(st, stmt.block)
-    st.b, st.scope = init_block, init_scope
-
-    ir.loopForIn(st.b, vars, expr, for_block)
+    M.genLoopBody(st, stmt.block, forBlock, forScope)
+    ir.loopForIn(st.b, vars, expr, forBlock)
   } elseif (stmt.ty == "break_stmt") {
     ir.brk(st.b)
+  } elseif (stmt.ty == "continue_stmt") {
+    if (!st.loopCtx) {
+      error("continue used outside of a loop", 0)
+    }
+    if (!st.loopCtx.continueLabel) {
+      st.loopCtx.continueLabel = ir.label(st.loopCtx.block)
+    }
+    ir.goto(st.b, st.loopCtx.continueLabel)
   } else {
     error("[codegen] unsupported statement: " .. stmt.ty, 0)
   }
+}
+
+M.genLoopBody = fn(st: any, stmts: any, loopBlock: any, loopScope: any) {
+  let initBlock = st.b
+  let initScope = st.scope
+  let initCtx = st.loopCtx
+
+  loopBlock = loopBlock || ir.block(initBlock)
+  loopScope = loopScope || scope.new(initScope)
+  let loopCtx = any {}
+  loopCtx.block = loopBlock
+
+  st.b, st.scope, st.loopCtx = loopBlock, loopScope, loopCtx
+
+  M.genBlock(st, stmts)
+  if (st.loopCtx.continueLabel) {
+    ir.labelStmt(st.b, st.loopCtx.continueLabel)
+  }
+
+  st.b, st.scope, st.loopCtx = initBlock, initScope, initCtx
+
+  return loopBlock, loopScope
 }
 
 M.genLetStmt = fn(any st, any stmt, any modTbl) {
@@ -216,15 +259,14 @@ M.genExpression = fn(any st, any expr) {
   } elseif (expr.ty == "identifier") {
     let var = scope.get(st.scope, expr.text)
     if (!var) {
-      print("W: implicit declaration of '" .. expr.text .. "'")
+      ; print("W: implicit declaration of '" .. expr.text .. "'")
       var = ir.var(st.rootBlock, any { globalIdent = expr.text })
       scope.set(st.globalScope, expr.text, var)
     }
     return var
   } elseif (expr.ty == "table_expr") {
     let pairs = any {}
-    let i = 1
-    while (i <= #expr.pairs) {
+    for (i = 1, #expr.pairs) {
       let pair = expr.pairs[i]
       let key = pair.key
       let value = M.genExpression(st, pair.value)
@@ -234,7 +276,6 @@ M.genExpression = fn(any st, any expr) {
       }
 
       pairs[#pairs + 1] = ir.tableEntry(key, value)
-      i = i + 1
     }
     return ir.tableConstructor(pairs)
   } elseif (expr.ty == "fn_expr") {
@@ -295,11 +336,10 @@ M.genExpression = fn(any st, any expr) {
 M.genCall = fn(any st, any expr) {
   let callee = M.genExpression(st, expr.callee)
   let args = any {}
-  let i = 1
-  while (i <= #expr.args) {
+  for (i = 1, #expr.args) {
     let arg = expr.args[i]
     args[i] = M.genExpression(st, arg)
-    i = i + 1
+    if (!args[i]) { return }
   }
   return ir.call(callee, args)
 }

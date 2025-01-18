@@ -1,0 +1,243 @@
+pub fn split(txt: any, chr: any) {
+  let lines = any {}
+  let i, j = 1, string.find(txt, chr, 1, true)
+
+  while (j) {
+    let line = string.sub(txt, i, j - 1)
+
+    table.insert(lines, line)
+
+    i = j + 1
+    j = string.find(txt, chr, i, true)
+  }
+
+  table.insert(lines, string.sub(txt, i))
+  return lines
+}
+
+pub fn ttyRead() {
+  let lines = any {}
+
+  parallel.waitForAny(
+    fn() {
+      while (true) {
+        table.insert(lines, read())
+      }
+    },
+    fn() {
+      let ctrl = false
+
+      while (true) {
+        let e, k, held = os.pullEvent("key")
+        let down = e == "key"
+        let up = e == "key_up"
+
+        if ((down || up) && !held) {
+          if (k == keys.leftCtrl) {
+            ctrl = down
+          } elseif (k == keys.rightCtrl) {
+            ctrl = down
+          } elseif (ctrl && k == keys.d) {
+            return
+          }
+        }
+      }
+    },
+  )
+
+  return table.concat(lines, "\n")
+}
+
+pub fn ttyDisplay(txt: any) {
+  let w, h = term.getSize()
+  let running = true
+  let scrollX = 0
+  let scrollY = 0
+  let lines = split(txt, "\n")
+
+  term.setCursorBlink(false)
+
+  while (running) {
+    term.clear()
+
+    let i = 1
+    while (i <= h && i + scrollY <= #lines) {
+      let line = lines[i + scrollY]
+      line = string.sub(line, 1 + scrollX, w + scrollX)
+
+      term.setCursorPos(1, i)
+      term.write(line)
+      i = i + 1
+    }
+
+    let e, c = os.pullEvent("char")
+
+    if (c == "h") {
+      scrollX = scrollX - 1
+    } elseif (c == "j") {
+      scrollY = scrollY + 1
+    } elseif (c == "d") {
+      scrollY = scrollY + 5
+    } elseif (c == "k") {
+      scrollY = scrollY - 1
+    } elseif (c == "u") {
+      scrollY = scrollY - 5
+    } elseif (c == "l") {
+      scrollX = scrollX + 1
+    } elseif (c == "g") {
+      scrollY = 0
+    } elseif (c == "G") {
+      scrollY = #lines - h
+    } elseif (c == "q") {
+      running = false
+    }
+
+    scrollX = math.max(scrollX, 0)
+    scrollY = math.max(scrollY, 0)
+  }
+
+  term.clear()
+  term.setCursorPos(1, 1)
+}
+
+pub fn openHandle(path: any) {
+  if (path == "-") {
+    return io.stdout
+  }
+
+  path = shell.resolve(path)
+  let h = io.open(path, "w")
+
+  assert(h, "No such file: " .. path)
+
+  return h
+}
+
+pub fn readSource(relPath: any) {
+  if (relPath == "-") {
+    return ttyRead()
+  }
+
+  let path = shell.resolve(relPath)
+  let h = io.open(path, "r")
+
+  if (!h) {
+    error("No such file: " .. relPath, 0)
+  }
+
+  let source = h.read(h, "a")
+  h.close(h)
+
+  return source
+}
+
+pub fn writeOutput(relPath: any, txt: any) {
+  if (relPath == "-") {
+    return ttyDisplay(txt)
+  }
+
+  let path = shell.resolve(relPath)
+  let h = io.open(path, "w")
+
+  if (!h) {
+    error("No such file: " .. relPath, 0)
+  }
+
+  h.write(h, txt)
+  h.flush(h)
+  h.close(h)
+}
+
+pub fn serialize(t: any, lvl: any, outLines: any, seen: any) {
+  if (type(t) == "nil") { return tostring(t) }
+  if (type(t) == "boolean") { return tostring(t) }
+  if (type(t) == "number") { return tostring(t) }
+  if (type(t) == "string") { return string.format("%q", t) }
+  if (type(t) != "table") { return "<" .. type(t) .. ">" }
+
+  let indent = string.rep("  ", lvl || 0)
+  let lines = outLines || any {}
+
+  seen = seen || any { t }
+
+  for (k, v in pairs(t)) {
+    if (type(v) == "table") {   
+      let i = 1
+      while (i <= #seen && seen[i] != v) {
+        i = i + 1
+      }
+
+      if (seen[i] == v) {
+        lines[#lines + 1] = string.format("%s%s: <rec $%d>", indent, k, i)
+      } else {
+        seen[#seen + 1] = v
+        lines[#lines + 1] = string.format("%s%s: $%d", indent, k, #seen)
+        serialize(v, (lvl || 0) + 1, lines, seen)
+      }
+    } else {
+      lines[#lines + 1] = string.format("%s%s: %s", indent, k, serialize(v))
+    }
+  }
+
+  if (!outLines) {
+    return table.concat(lines, "\n")
+  }
+}
+
+pub fn displayErrors(errors: any, source: any, path: any) {
+  let srcLines = split(source, "\n")
+  let out = any {}
+
+  for (ei = 1, #errors) {
+    let err = errors[ei]
+    let tk = err.token || any {
+      line = #srcLines,
+      col = #srcLines[#srcLines] + 1,
+      text = " ",
+    }
+
+    if (ei > 1) {
+      out[#out + 1] = ""
+    }
+
+    out[#out + 1] = string.format("error: %s", err.msg)
+    out[#out + 1] = string.format(
+      " -> %s:%d:%d",
+      path,
+      tk.line,
+      tk.col,
+    )
+
+    let srcLine = srcLines[tk.line]
+    let linePrefix = string.format("%d | ", tk.line)
+
+    out[#out + 1] = linePrefix .. srcLine
+    out[#out + 1] =
+      string.rep(" ", #linePrefix + tk.col - 1) ..
+      string.rep("~", #tk.text)
+  }
+
+  writeOutput("-", table.concat(out, "\n"))
+}
+
+pub fn sh(...) {
+  if (!shell.execute(...)) {
+    printError("Command failed:", ...)
+    return false
+  }
+  return true
+}
+
+let UID_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+
+pub fn uid(size: any) {
+  return string.gsub(
+    string.rep(".", size || 21),
+    ".",
+    fn() {
+      let i = math.floor(math.random() * 64)
+      return string.sub(UID_ALPHABET, i, i)
+    },
+  )
+}

@@ -110,7 +110,8 @@ M.module = fn(any st) {
   while (!eof(st) && !peek(st, "return")) {
     node.stmts[#node.stmts + 1] = M.moduleStmt(st)
 
-    sync(st, "pub", "mod", "let", "fn", "if", "while", "for", "return")
+    sync(st, "pub", "mod", "let", "fn", "if", "while", "for", "return",
+      "run")
   }
 
   if (peek(st, "return")) {
@@ -159,6 +160,20 @@ M.statement = fn(any st) {
     return M.letStmt(st)
   } elseif (peek(st, "fn")) {
     return M.fnStmt(st)
+  } elseif (next(st, "run")) {
+    let tk = peek(st)
+    let call = M.postfixExpr(st)
+
+    if (!call) { return }
+    if (call.ty != "call_expr") {
+      addError(st, "expected function call after 'run'", tk)
+      return
+    }
+
+    let stmt = any {}
+    stmt.ty = "run_stmt"
+    stmt.call = call
+    return stmt
   } elseif (next(st, "if")) {
     let clauses = any {}
     clauses[1] = any {}
@@ -232,8 +247,10 @@ M.statement = fn(any st) {
     let stmt = any {}
     stmt.ty = "break_stmt"
     return stmt
-  } elseif(peek(st, "continue")) {
-    return todo(st, "continue statement")
+  } elseif(next(st, "continue")) {
+    let stmt = any {}
+    stmt.ty = "continue_stmt"
+    return stmt
   }
 
   let expr = M.postfixExpr(st)
@@ -369,8 +386,8 @@ M.postfixExpr = fn(any st) {
 fn binopTemplate(any p, any associativity, any ...) {
   let argOps = table.pack(...)
 
-  assert(type(p) == "function", "p must be a function (for '"
-    .. table.concat(argOps, "', '") .. "')")
+  assert(type(p) == "function", "p must be a function (for '" ..
+    table.concat(argOps, "', '") .. "')")
 
   if (associativity == "left") {
     return fn(any st) {

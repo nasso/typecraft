@@ -1,0 +1,235 @@
+let utils = require("utils")
+let lexer = require("lexer")
+let parser = require("parser")
+let codegen = require("codegen")
+let emitter = require("emitter")
+
+let VERSION = "0.3.0"
+let EMIT_KINDS = any { "tokens", "ast", "ir", "lua", "link" }
+let TEMP = "/tcc-" .. utils.uid(8)
+
+fn printUsage(any arg0, any h) {
+  h.write(
+    h,
+    table.concat(
+      any {
+        "Usage:",
+        "  " .. arg0 .. " [options] [input] ...",
+        "",
+        "Available options:",
+        "  -h, --help    Display this message",
+        "  -v, --version Display the current version and exit",
+        "  -o <path>     Specify the primary output path (default 'a.out')",
+        "  --emit <kind> Specify the kind of output (default 'link')",
+        "                One of: tokens, ast, ir, lua, link",
+        "  -c            Same as '--emit lua' (compile without linking)",
+        "",
+        "Input/output paths may be '-' for the standard input/output.",
+        "",
+      },
+      "\n",
+    ),
+  )
+}
+
+fn parseArgs(any args) {
+  let opts = any {
+    help = false,
+    inputPaths = any {},
+    outputPath = nil,
+    emit = "link",
+    linkerArgs = any {},
+  }
+
+  let i = 1
+  while (i <= #args) {
+    let arg = args[i]
+
+    if (arg == "-h" || arg == "--help") {
+      opts.help = true
+      return opts
+    } elseif (arg == "-v" || arg == "--version") {
+      opts.version = true
+      return opts
+    } elseif (arg == "-c") {
+      opts.emit = "lua"
+    } elseif (arg == "--emit") {
+      i = i + 1
+      let v = args[i]
+      let m = nil
+      for (i = 1, #EMIT_KINDS) {
+        if (v == EMIT_KINDS[i]) {
+          m = v
+          break
+        }
+      }
+      if (!v) {
+        return error(
+          "--emit must be one of: '" ..
+          table.concat(EMIT_KINDS, "', '") ..
+          "'",
+          0,
+        )
+      }
+      opts.emit = v
+    } elseif (arg == "-o") {
+      i = i + 1
+      opts.outputPath = args[i]
+    } elseif (string.match(arg, "^%-[lL]")) {
+      opts.linkerArgs[#opts.linkerArgs + 1] = arg
+    } elseif (string.byte(arg, 1) == '-') {
+      return error("unrecognized option: " .. arg, 0)
+    } else {
+      opts.inputPaths[#opts.inputPaths + 1] = arg
+    }
+    i = i + 1
+  }
+
+  if (#opts.inputPaths == 0) {
+    opts.inputPaths[1] = "-"
+  }
+
+  if (!opts.outputPath && opts.emit == "link") {
+    opts.outputPath = "a.out"
+  }
+
+  if (opts.outputPath && opts.emit != "link" && #opts.inputPaths > 1) {
+    printError("Can't use `-o` with more than 1 input file without linking")
+    return nil
+  }
+
+  return opts
+}
+
+let opts = parseArgs(arg)
+
+if (!opts) {
+  printUsage(arg[0], io.stderr)
+  return
+} elseif (opts.help) {
+  print("TypeCraft Compiler v" .. VERSION)
+  printUsage(arg[0], io.stdout)
+  return
+} elseif (opts.version) {
+  print("TypeCraft Compiler v" .. VERSION)
+  return
+}
+
+fn outputPathFor(input: any) {
+  let defaultOutputPath = string.gsub(input, "%.%w*$", ".lua")
+
+  ; when we don't link, the output path is just the primary output (`-o`)
+  ; this is ok because `-o` cannot be used with more than >1 input file...
+  if (opts.emit != "link") {
+    if (opts.outputPath == nil) {
+      ; if `-o` wasn't specified we put it right next to the input file
+      return defaultOutputPath
+    }
+
+    return opts.outputPath
+  }
+
+  ; ...unless we ARE linking, in which case we put files in the temp dir
+  return "/" .. fs.combine(TEMP, defaultOutputPath)
+}
+
+fn compile(inputPath: any) {
+  let outputPath = outputPathFor(inputPath)
+  let source = utils.readSource(inputPath)
+  let tokens, errors = lexer.scan(source)
+
+  if (errors && #errors > 0) {
+    utils.displayErrors(errors, source, inputPath)
+    return nil
+  }
+
+  if (opts.emit == "tokens") {
+    utils.writeOutput(outputPath, utils.serialize(tokens))
+    return outputPath
+  }
+
+  let ast, errors = parser.parse(tokens)
+
+  if (errors && #errors > 0) {
+    utils.displayErrors(errors, source, inputPath)
+    return nil
+  }
+
+  if (opts.emit == "ast") {
+    utils.writeOutput(outputPath, utils.serialize(ast))
+    return outputPath
+  }
+
+  let ir, errors = codegen.lower(ast)
+
+  if (errors && #errors > 0) {
+    utils.displayErrors(errors, source, inputPath)
+    return nil
+  }
+
+  if (opts.emit == "ir") {
+    utils.writeOutput(outputPath, utils.serialize(ir))
+    return outputPath
+  }
+
+  let handle = utils.openHandle(outputPath)
+  let errors = emitter.emit(handle, ir, true)
+  handle.close(handle)
+
+  if (errors && #errors > 0) {
+    utils.displayErrors(errors, source, inputPath)
+    return nil
+  }
+
+  return outputPath
+}
+
+let failed = false
+let linkerInputs = any {}
+
+for (_, inputPath in ipairs(opts.inputPaths)) {
+  if (string.match(inputPath, "%.lua$")) {
+    let outputPath = outputPathFor(inputPath)
+    let src = shell.resolve(inputPath)
+    let dst = shell.resolve(outputPath)
+
+    ; JUST to be sure
+    if (src != dst) {
+      fs.copy(src, dst)
+    }
+
+    linkerInputs[#linkerInputs + 1] = outputPath
+  } else {
+    let outputPath = compile(inputPath)
+
+    if (outputPath) {
+      linkerInputs[#linkerInputs + 1] = outputPath
+    } else {
+      failed = true
+    }
+  }
+}
+
+if (failed) {
+  fs.delete(TEMP)
+  return error("Compilation failed.", 0)
+}
+
+if (opts.emit != "link") { return }
+
+let linkerArgs = any {}
+
+for (_, v in ipairs(opts.linkerArgs)) {
+  table.insert(linkerArgs, v)
+}
+for (_, v in ipairs(linkerInputs)) {
+  table.insert(linkerArgs, v)
+}
+
+utils.sh(
+  "ll",
+  "-o", opts.outputPath,
+  "--runtime", "/lib/tcrt.lua",
+  table.unpack(linkerArgs),
+)
+fs.delete(TEMP)

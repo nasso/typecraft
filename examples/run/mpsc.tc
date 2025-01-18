@@ -1,0 +1,27 @@
+let UID_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+
+fn uid(size: any) {
+  return string.gsub(
+    string.rep(".", size || 21),
+    ".",
+    fn() {
+      let i = math.floor(math.random() * 64)
+      return string.sub(UID_ALPHABET, i, i)
+    },
+  )
+}
+
+pub fn channel() {
+  let name = "channel-" .. uid()
+
+  fn tx(...) {
+    os.queueEvent(name, ...)
+  }
+
+  fn rx() {
+    return select(2, os.pullEvent(name))
+  }
+
+  return tx, rx
+}

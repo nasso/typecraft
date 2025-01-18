@@ -3,10 +3,11 @@ let M = any {}
 M.block = fn(parent: any) {
   let b = any {}
   b.stmts = any {}
-  b.bc = 0
-  b.vc = 0
-  b.ivc = 0
-  b.i = 0
+  b.i   = 0 ; block id
+  b.bc  = 0 ; block counter
+  b.lc  = 0 ; label counter
+  b.vc  = 0 ; var counter
+  b.ivc = 0 ; implicit var counter
 
   if (parent) {
     parent.bc = parent.bc + 1
@@ -28,6 +29,17 @@ M.brk = fn(any b) {
   let stmt = any {}
   stmt.ty = "break"
   b.stmts[#b.stmts + 1] = stmt
+}
+
+M.goto = fn(b: any, label: any) {
+  let stmt = any {}
+  stmt.ty = "goto"
+  stmt.label = label
+  b.stmts[#b.stmts + 1] = stmt
+}
+
+M.labelStmt = fn(b: any, label: any) {
+  b.stmts[#b.stmts + 1] = label
 }
 
 M.branch = fn(any cond, any block) {
@@ -111,6 +123,16 @@ M.vararg = fn() {
   let lit = any {}
   lit.ty = "vararg"
   return lit
+}
+
+M.label = fn(b: any) {
+  b.lc = b.lc + 1
+
+  let label = any {}
+  label.ty = "label"
+  label.b = b
+  label.i = b.lc
+  return label
 }
 
 M.var = fn(any b, any opts) {

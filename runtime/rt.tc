@@ -1,0 +1,120 @@
+let started = false
+let newThreads = any { n = 0 }
+let threads = any { n = 0 }
+let freeIds = any { n = 0 }
+
+let co_create = coroutine.create
+let co_resume = coroutine.resume
+let co_status = coroutine.status
+
+fn mkThread(f: any, args: any) {
+  let t = any {}
+  t.filter = nil
+  t.co = co_create(fn() {
+    return f(table.unpack(args))
+  })
+
+  return t
+}
+
+fn addThread(t: any) {
+  if (freeIds[1]) {
+    let id = freeIds[freeIds.n]
+    freeIds[freeIds.n] = nil
+    freeIds.n = freeIds.n - 1
+    threads[id] = t
+    if (id > threads.n) {
+      threads.n = id
+    }
+  } else {
+    threads.n = threads.n + 1
+    threads[threads.n] = t
+  }
+}
+
+fn freeThread(id: any) {
+  threads[id] = nil
+  if (id == threads.n) {
+    threads.n = id - 1
+  }
+  freeIds.n = freeIds.n + 1
+  freeIds[freeIds.n] = id
+}
+
+pub fn queue(f: any, args: any) {
+  let t = mkThread(f, args)
+
+  newThreads.n = newThreads.n + 1
+  newThreads[newThreads.n] = t
+}
+
+pub fn start(main: any, args: any) {
+  if (started || threads.n != 0) {
+    error("start() was called twice", 0)
+  }
+  started = true
+
+  let mainThread = mkThread(main, args)
+  addThread(mainThread)
+
+  let data = table.pack(table.unpack(args))
+
+  ; THE event loop
+  while (true) {
+    let eventName = data[1]
+
+    for (i = 1, threads.n) {
+      let t = threads[i]
+
+      if (!t) { continue }
+
+      ; maybe its already dead
+      if (co_status(t.co) == "dead") {
+        if (t == mainThread) { return }
+        freeThread(i)
+        continue
+      }
+
+      if (
+        eventName &&
+        eventName != "terminate" &&
+        t.filter &&
+        t.filter != eventName
+      ) {
+        continue
+      }
+
+      let ok, p = co_resume(t.co, table.unpack(data, 1, data.n))
+      if (!ok) {
+        return error(p, 0)
+      }
+      t.filter = p
+
+      if (co_status(t.co) == "dead") {
+        if (t == mainThread) { return }
+        freeThread(i)
+      }
+    }
+
+    ; start the new ones
+    for (i = 1, newThreads.n) {
+      let t = newThreads[i]
+      newThreads[i] = nil
+
+      let ok, p = co_resume(t.co)
+      if (!ok) {
+        return error(p, 0)
+      }
+      t.filter = p
+
+      ; skip adding it to `threads` if it's already dead
+      if (co_status(t.co) != "dead") {
+        ; the main thread is never "new", so no need to check for it here
+        addThread(t)
+      }
+    }
+
+    newThreads.n = 0
+    data = table.pack(os.pullEvent())
+  }
+}

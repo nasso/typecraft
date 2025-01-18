@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## tcc 0.3.0
+
+- feat!: add `--emit link` (new default)
+- feat!: `tcc` now outputs to a file by default
+- feat: `tcc` now accepts multiple inputs and uses `ll` to link them
+- feat: `tcc` links programs with a runtime found in `/lib/tcrt.lua`
+- feat: add `-c`, an alias for `--emit lua`
+- feat: implement `continue` statements
+- feat: implement `run` statements
+- feat: improve generated code quality by emitting less string literals
+
 ## tcc 0.2.2
 
 - fix: crash when missing the `)` in a function call inside a block

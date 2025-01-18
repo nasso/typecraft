@@ -1,0 +1,45 @@
+let mpsc = require("mpsc")
+
+fn count(tx: any) {
+  let i = 1
+  while (true) {
+    os.sleep(1)
+    tx(i)
+    i = i + 1
+  }
+}
+
+fn fizz(tx: any) {
+  while (true) {
+    os.sleep(3)
+    tx("fizz")
+  }
+}
+
+fn buzz(tx: any) {
+  while (true) {
+    os.sleep(5)
+    tx("buzz")
+  }
+}
+
+fn quit(tx: any) {
+  while (true) {
+    let _, key = os.pullEvent("key")
+    if (key == keys.q) {
+      print("quitting...")
+      tx(false)
+    }
+  }
+}
+
+let tx, rx = mpsc.channel()
+run count(tx)
+run fizz(tx)
+run buzz(tx)
+run quit(tx)
+while (true) {
+  let msg = rx()
+  if (!msg) { break }
+  print(msg)
+}
