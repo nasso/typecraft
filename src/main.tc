@@ -4,7 +4,7 @@ let parser = require("parser")
 let codegen = require("codegen")
 let emitter = require("emitter")
 
-let VERSION = "0.2.0"
+let VERSION = "0.2.1"
 
 fn printUsage(any arg0, any h) {
   h.write(h, "Usage: " .. arg0 .. " [input] [-o output]\n")

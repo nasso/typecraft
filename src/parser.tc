@@ -188,14 +188,50 @@ M.statement = fn(any st) {
     stmt.expr = M.parenExpr(st)
     stmt.block = M.block(st)
     return stmt
+  } elseif(next(st, "for")) {
+    if (!expect(st, "(")) { return }
+
+    let stmt = any {}
+
+    let ident = expect(st, "identifier")
+    if (!ident) { return }
+
+    if (next(st, "=")) {
+      ; for (i = <init>, <limit> [, <step>]) { ... }
+      stmt.ty = "for_stmt"
+      stmt.var = ident
+      stmt.init = M.expression(st)
+      if (!stmt.init) { return }
+      if (!expect(st, ",")) { return }
+      stmt.limit = M.expression(st)
+      if (!stmt.limit) { return }
+      if (next(st, ",")) {
+        stmt.step = M.expression(st)
+        if (!stmt.step) { return }
+      }
+    } else {
+      ; for (a, b, [...] in <expr>) { ... }
+      stmt.ty = "for_in_stmt"
+      stmt.vars = any { ident }
+      while (next(st, ",")) {
+        let e = expect(st, "identifier")
+        if (!e) { return }
+        stmt.vars[#stmt.vars + 1] = e
+      }
+      if (!expect(st, "in")) { return }
+      stmt.expr = M.expression(st)
+      if (!stmt.expr) { return }
+    }
+
+    if (!expect(st, ")")) { return }
+    stmt.block = M.block(st)
+    if (!stmt.block) { return }
+
+    return stmt
   } elseif(next(st, "break")) {
     let stmt = any {}
     stmt.ty = "break_stmt"
     return stmt
-  } elseif(peek(st, "for")) {
-    return todo(st, "for loop")
-  } elseif(peek(st, "break")) {
-    return todo(st, "break statement")
   } elseif(peek(st, "continue")) {
     return todo(st, "continue statement")
   }
@@ -219,7 +255,7 @@ M.statement = fn(any st) {
     lvalues[#lvalues + 1] = M.postfixExpr(st)
   }
 
-  expect(st, "=")
+  if (!expect(st, "=")) { return }
 
   let rvalues = any {}
   rvalues[1] = M.expression(st)
@@ -309,7 +345,10 @@ M.postfixExpr = fn(any st) {
       let args = any {}
 
       while (!next(st, ")")) {
-        args[#args + 1] = M.expression(st)
+        let arg = M.expression(st)
+        if (!arg) { return }
+
+        args[#args + 1] = arg
 
         if (!peek(st, ")")) {
           expect(st, ",")

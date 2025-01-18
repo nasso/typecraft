@@ -64,7 +64,8 @@ M.genStatement = fn(any st, any stmt, any modTbl) {
       lvals[#lvals + 1] = M.genExpression(st, stmt.lvalues[i])
       i = i + 1
     }
-    i = 1
+
+    let i = 1
     while (i <= #stmt.rvalues) {
       rvals[#rvals + 1] = M.genExpression(st, stmt.rvalues[i])
       i = i + 1
@@ -101,13 +102,49 @@ M.genStatement = fn(any st, any stmt, any modTbl) {
     ir.conditional(st.b, branches)
   } elseif (stmt.ty == "while_stmt") {
     let cond = M.genExpression(st, stmt.expr)
-    let block = ir.block(st.b)
+    let block, scope = ir.block(st.b), scope.new(st.scope)
+    let init_block, init_scope = st.b, st.scope
 
     st.b = block
+    st.scope = scope
     M.genBlock(st, stmt.block)
-    st.b = st.b.parent
+    st.b = init_block
+    st.scope = init_scope
 
     ir.loopWhile(st.b, cond, block)
+  } elseif (stmt.ty == "for_stmt") {
+    let init = M.genExpression(st, stmt.init)
+    let limit = M.genExpression(st, stmt.limit)
+    let step = stmt.step && M.genExpression(st, stmt.step)
+    let for_block, for_scope = ir.block(st.b), scope.new(st.scope)
+    let var = ir.var(for_block, any { implicit = true })
+
+    scope.set(for_scope, stmt.var.text, var)
+
+    let init_block, init_scope = st.b, st.scope
+    st.b, st.scope = for_block, for_scope
+    M.genBlock(st, stmt.block)
+    st.b, st.scope = init_block, init_scope
+
+    ir.loopFor(st.b, var, init, limit, step, for_block)
+  } elseif (stmt.ty == "for_in_stmt") {
+    let expr = M.genExpression(st, stmt.expr)
+    let for_block, for_scope = ir.block(st.b), scope.new(st.scope)
+    let vars = ir.vars(for_block, #stmt.vars, any { implicit = true })
+
+    let i = 1
+    while (i <= #stmt.vars) {
+      let ident = stmt.vars[i]
+      scope.set(for_scope, ident.text, vars[i])
+      i = i + 1
+    }
+
+    let init_block, init_scope = st.b, st.scope
+    st.b, st.scope = for_block, for_scope
+    M.genBlock(st, stmt.block)
+    st.b, st.scope = init_block, init_scope
+
+    ir.loopForIn(st.b, vars, expr, for_block)
   } elseif (stmt.ty == "break_stmt") {
     ir.brk(st.b)
   } else {
@@ -268,26 +305,23 @@ M.genCall = fn(any st, any expr) {
 }
 
 M.genFnExpr = fn(st: any, expr: any) {
-  let func = ir.function(st.b, #expr.params)
-
-  func.variadic = expr.variadic
-
-  st.b = func.body
-  st.scope = scope.new(st.scope)
+  let fn_body, fn_scope = ir.block(st.b), scope.new(st.scope)
+  let params = ir.vars(fn_body, #expr.params, any { implicit = true })
 
   let i = 1
   while (i <= #expr.params) {
     let param = expr.params[i]
-    scope.set(st.scope, param.ident.text, func.params[i])
+    scope.set(fn_scope, param.ident.text, params[i])
     i = i + 1
   }
 
+  let init_body, init_scope = st.b, st.scope
+
+  st.b, st.scope = fn_body, fn_scope
   M.genBlock(st, expr.body)
+  st.b, st.scope = init_body, init_scope
 
-  st.b = st.b.parent
-  st.scope = st.scope.parent
-
-  return func
+  return ir.function(params, fn_body, expr.variadic)
 }
 
 return M

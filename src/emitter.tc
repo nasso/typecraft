@@ -22,9 +22,54 @@ LUAOPS["gte"]    = ">="
 LUAOPS["lt"]     = "<"
 LUAOPS["gt"]     = ">"
 
+fn getVarName(st: any, block: any, id: any, implicit: any) {
+  if (!id) {
+    let var = block
+
+    if (var.ident) { return var.ident }
+
+    block = var.b
+    id = var.i
+    implicit = var.implicit || false
+  } else {
+    implicit = implicit || false
+  }
+
+  let key = any {}
+
+  if (implicit) { key[#key + 1] = "i" }
+  key[#key + 1] = ":"
+
+  while (block.parent) {
+    key[#key + 1] = string.format("%x.", block.i)
+    block = block.parent
+  }
+
+  key[#key + 1] = string.format("%x", id)
+  key = table.concat(key)
+
+  let var = st.vars[key]
+  if (var) {
+    return var
+  }
+
+  if (implicit) {
+    st.iic = st.iic + 1
+    var = string.format("i_%x", st.iic)
+  } else {
+    st.ic = st.ic + 1
+    var = string.format("v_%x", st.ic)
+  }
+
+  st.vars[key] = var
+
+  return var
+}
+
 M.emit = fn(any h, any block, any pretty) {
   let st = any {}
   st.ic = 0
+  st.iic = 0
   st.vars = any {}
   st.w = fn(any ...) {
     return h.write(h, table.concat(table.pack(...)))
@@ -55,46 +100,14 @@ M.emit = fn(any h, any block, any pretty) {
   M.emitBlock(st, block)
 }
 
-M.varName = fn(any st, any block, any id) {
-  if (!id) {
-    let var = block
-
-    if (var.ident) { return var.ident }
-
-    block = var.b
-    id = var.i
-  }
-
-  let key = any {}
-
-  while (block.parent) {
-    key[#key + 1] = string.format("%x", block.i)
-    block = block.parent
-  }
-
-  key[#key + 1] = string.format("%x", id)
-  key = table.concat(key, "_")
-
-  let var = st.vars[key]
-  if (var) {
-    return var
-  }
-
-  st.ic = st.ic + 1
-  var = string.format("v%x", st.ic)
-  st.vars[key] = var
-
-  return var
-}
-
 M.emitBlock = fn(any st, any block) {
-  if (#block.stmts > 0 && block.vc >= block.vs) {
+  if (#block.stmts > 0 && block.vc > 0) {
     st.beginStmt()
     st.w("local ")
 
-    let i = block.vs
+    let i = 1
     while (i <= block.vc) {
-      let name = M.varName(st, block, i)
+      let name = getVarName(st, block, i)
       st.w(name)
       if (i < block.vc) { st.w(",") }
       i = i + 1
@@ -156,6 +169,37 @@ M.emitStatement = fn(any st, any stmt) {
     M.emitBlock(st, stmt.block)
     st.endBlock()
     st.w("end")
+  } elseif (stmt.ty == "for") {
+    st.w("for ")
+    M.emitExpr(st, stmt.var)
+    st.w("=")
+    M.emitExpr(st, stmt.init)
+    st.w(",")
+    M.emitExpr(st, stmt.limit)
+    if (stmt.step) {
+      st.w(",")
+      M.emitExpr(st, stmt.step)
+    }
+    st.w(" do")
+    st.beginBlock()
+    M.emitBlock(st, stmt.block)
+    st.endBlock()
+    st.w("end")
+  } elseif (stmt.ty == "for_in") {
+    st.w("for ")
+    let i = 1
+    while (i <= #stmt.vars) {
+      if (i > 1) { st.w(",") }
+      M.emitExpr(st, stmt.vars[i])
+      i = i + 1
+    }
+    st.w(" in ")
+    M.emitExpr(st, stmt.expr)
+    st.w(" do")
+    st.beginBlock()
+    M.emitBlock(st, stmt.block)
+    st.endBlock()
+    st.w("end")
   } elseif (stmt.ty == "break") {
     st.w("break")
   } else {
@@ -194,7 +238,7 @@ M.emitExpr = fn(any st, any expr) {
     let i = 1
     while (i <= #expr.params) {
       let param = expr.params[i]
-      let paramName = M.varName(st, param)
+      let paramName = getVarName(st, param)
       if (i > 1) { st.w(",") }
       st.w(paramName)
       i = i + 1
@@ -218,7 +262,7 @@ M.emitExpr = fn(any st, any expr) {
   } elseif (expr.ty == "call") {
     M.emitCall(st, expr)
   } elseif (expr.ty == "var") {
-    let name = M.varName(st, expr)
+    let name = getVarName(st, expr)
     if (!name) {
       error("variable '" .. expr.i .. "' doesn't exist", 0)
     }

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## tcc 0.2.1
+
+- feat: add `for` and `for..in` loop statements
+- fix: crash when missing `any` in a function call table argument
+- fix: declarations in a `while` may leak into parent scope
+
 ## tcc 0.2.0
 
 - feat!: add reserved keyword `in`

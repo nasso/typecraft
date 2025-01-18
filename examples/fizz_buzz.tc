@@ -1,0 +1,33 @@
+let args = any { ... }
+
+let start, limit, step = 1, 15, 1
+
+if (#args == 1) {
+  limit = tonumber(args[1])
+} elseif (#args == 2) {
+  start = tonumber(args[1])
+  limit = tonumber(args[2])
+} elseif (#args == 3) {
+  start = tonumber(args[1])
+  limit = tonumber(args[2])
+  step = tonumber(args[3])
+} elseif (#args > 3) {
+  error(
+    "Usage:\n" ..
+    "  " .. arg[0] .. "\n" ..
+    "  " .. arg[0] .. " <limit>\n" ..
+    "  " .. arg[0] .. " <start> <limit>\n" ..
+    "  " .. arg[0] .. " <start> <limit> <step>\n",
+    0
+  )
+}
+
+for (i = start, limit, step) {
+  let fizz = i % 3 == 0
+  let buzz = i % 5 == 0
+
+  if (fizz && buzz) { print("Fizz Buzz") }
+  elseif (fizz) { print("Fizz") }
+  elseif (buzz) { print("Buzz") }
+  else { print(i) }
+}

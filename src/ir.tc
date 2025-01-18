@@ -1,11 +1,11 @@
 let M = any {}
 
-M.block = fn(any parent) {
+M.block = fn(parent: any) {
   let b = any {}
   b.stmts = any {}
   b.bc = 0
   b.vc = 0
-  b.vs = 1
+  b.ivc = 0
   b.i = 0
 
   if (parent) {
@@ -52,6 +52,33 @@ M.loopWhile = fn(any b, any cond, any block) {
   b.stmts[#b.stmts + 1] = stmt
 }
 
+M.loopFor = fn(
+  b: any,
+  var: any,
+  init: any,
+  limit: any,
+  step: any,
+  block: any,
+) {
+  let stmt = any {}
+  stmt.ty = "for"
+  stmt.var = var
+  stmt.init = init
+  stmt.limit = limit
+  stmt.step = step
+  stmt.block = block
+  b.stmts[#b.stmts + 1] = stmt
+}
+
+M.loopForIn = fn(b: any, vars: any, expr: any, block: any) {
+  let stmt = any {}
+  stmt.ty = "for_in"
+  stmt.vars = vars
+  stmt.expr = expr
+  stmt.block = block
+  b.stmts[#b.stmts + 1] = stmt
+}
+
 M.storeAll = fn(any b, any lvals, any rvals) {
   let stmt = any {}
   stmt.ty = "store"
@@ -88,20 +115,26 @@ M.vararg = fn() {
 
 M.var = fn(any b, any opts) {
   let globalIdent = opts && opts.globalIdent
-
-  if (globalIdent) {
-    let var = any {}
-    var.ty = "var"
-    var.ident = globalIdent
-    return var
-  }
-
-  b.vc = b.vc + 1
+  let implicit = opts && opts.implicit
 
   let var = any {}
   var.ty = "var"
-  var.b = b
-  var.i = b.vc
+
+  if (globalIdent) {
+    var.ident = globalIdent
+  } else {
+    var.b = b
+  }
+
+  if (globalIdent || implicit) {
+    b.ivc = b.ivc + 1
+    var.i = b.ivc
+    var.implicit = true
+  } else {
+    b.vc = b.vc + 1
+    var.i = b.vc
+  }
+
   return var
 }
 
@@ -116,17 +149,12 @@ M.vars = fn(any b, any count, any opts) {
   return vars
 }
 
-M.function = fn(any b, any paramCount) {
-  let bodyBlock = M.block(b)
-  let params = M.vars(bodyBlock, paramCount)
-
-  bodyBlock.vs = bodyBlock.vc + 1
-
+M.function = fn(params: any, body_block: any, variadic: any) {
   let func = any {}
   func.ty = "function"
   func.params = params
-  func.variadic = false
-  func.body = bodyBlock
+  func.variadic = variadic
+  func.body = body_block
   return func 
 }
 

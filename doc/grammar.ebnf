@@ -11,7 +11,7 @@ statement     = letStmt
               | "while" parenExpr block
               | "for" "(" IDENTIFIER  "=" expression   ","
                           expression ("," expression)? ")" block
-              | "for" "(" identList "in" exprList ")" block
+              | "for" "(" identList "in" expression ")" block
               | "break"
               | "continue"
               | assignStmt
@@ -51,7 +51,7 @@ primaryExpr   = "nil"
 parenExpr     = "(" expression ")"
 fnBody        = "(" paramList? ")" block
 paramList     = param ("," param)* ","?
-param         = (IDENTIFIER | "...") ":" typeExpr
+param         = "..." | (IDENTIFIER ":" typeExpr)
 block         = "{" statement* ("return" (exprList ","?)?)? "}"
 fieldList     = field ("," field)* ","?
 field         = ((IDENTIFIER | "[" expression "]") "=")? expression
