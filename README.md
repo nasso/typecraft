@@ -1,3 +1,5 @@
+# :warning: This repository has been merged into [my ComputerCraft monorepo][1].
+
 # Typecraft
 
 A statically-typed programming language that compiles to Lua.
